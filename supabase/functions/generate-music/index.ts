@@ -9,189 +9,206 @@ const corsHeaders = {
 const KIE_API_BASE = 'https://api.kie.ai'
 
 serve(async (req) => {
-  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders })
   }
 
   try {
-    const { prompt } = await req.json()
-
-    if (!prompt) {
-      return new Response(
-        JSON.stringify({ error: 'Prompt is required' }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
-      )
-    }
-
+    const url = new URL(req.url)
+    const action = url.searchParams.get('action') || 'generate'
+    
     const kieApiKey = Deno.env.get('KIE_API_KEY')
     if (!kieApiKey) {
-      console.error('KIE_API_KEY not configured')
       return new Response(
         JSON.stringify({ error: 'API key not configured' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
       )
     }
 
-    console.log('Generating music for prompt:', prompt)
+    // ACTION: Start generation
+    if (action === 'generate') {
+      const { prompt } = await req.json()
+      if (!prompt) {
+        return new Response(
+          JSON.stringify({ error: 'Prompt is required' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+        )
+      }
 
-    // Step 1: Start music generation task
-    const generateResponse = await fetch(`${KIE_API_BASE}/api/v1/generate`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${kieApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        prompt: prompt,
-        customMode: false,
-        instrumental: true,
-        model: 'V3_5',
-        callBackUrl: 'https://example.com/callback', // Required by API, but we poll instead
-      }),
-    })
+      console.log('Starting music generation for prompt:', prompt)
 
-    if (!generateResponse.ok) {
-      const errorText = await generateResponse.text()
-      console.error('Kie API generate error:', generateResponse.status, errorText)
-      throw new Error(`API error: ${generateResponse.status}`)
+      const generateResponse = await fetch(`${KIE_API_BASE}/api/v1/generate`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${kieApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          prompt: prompt,
+          customMode: false,
+          instrumental: true,
+          model: 'V3_5',
+          callBackUrl: 'https://example.com/callback',
+        }),
+      })
+
+      if (!generateResponse.ok) {
+        const errorText = await generateResponse.text()
+        console.error('Kie API generate error:', generateResponse.status, errorText)
+        throw new Error(`API error: ${generateResponse.status}`)
+      }
+
+      const generateData = await generateResponse.json()
+      console.log('Generate response:', JSON.stringify(generateData))
+
+      if (generateData.code !== 200) {
+        throw new Error(generateData.msg || 'Failed to start generation')
+      }
+
+      const taskId = generateData.data.taskId
+      console.log('Task ID:', taskId)
+
+      return new Response(
+        JSON.stringify({ 
+          success: true,
+          taskId: taskId,
+          status: 'PENDING',
+          prompt: prompt
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
     }
 
-    const generateData = await generateResponse.json()
-    console.log('Generate response:', JSON.stringify(generateData))
+    // ACTION: Check status and finalize
+    if (action === 'status') {
+      const taskId = url.searchParams.get('taskId')
+      const prompt = url.searchParams.get('prompt') || ''
+      
+      if (!taskId) {
+        return new Response(
+          JSON.stringify({ error: 'taskId is required' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+        )
+      }
 
-    if (generateData.code !== 200) {
-      throw new Error(generateData.msg || 'Failed to start generation')
-    }
-
-    const taskId = generateData.data.taskId
-    console.log('Task ID:', taskId)
-
-    // Step 2: Poll for completion (max 3 minutes)
-    const maxAttempts = 36 // 36 * 5 seconds = 3 minutes
-    let attempts = 0
-    let taskData = null
-
-    while (attempts < maxAttempts) {
-      await new Promise(resolve => setTimeout(resolve, 5000)) // Wait 5 seconds
-      attempts++
-
-      console.log(`Polling attempt ${attempts}...`)
+      console.log('Checking status for task:', taskId)
 
       const statusResponse = await fetch(
         `${KIE_API_BASE}/api/v1/generate/record-info?taskId=${taskId}`,
         {
           method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${kieApiKey}`,
-          },
+          headers: { 'Authorization': `Bearer ${kieApiKey}` },
         }
       )
 
       if (!statusResponse.ok) {
         console.error('Status check error:', statusResponse.status)
-        continue
+        return new Response(
+          JSON.stringify({ status: 'PENDING', taskId }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
       }
 
       const statusData = await statusResponse.json()
       console.log('Status response:', JSON.stringify(statusData))
 
       if (statusData.code !== 200) {
-        continue
+        return new Response(
+          JSON.stringify({ status: 'PENDING', taskId }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
       }
 
       const status = statusData.data?.status
-      if (status === 'SUCCESS') {
-        taskData = statusData.data
-        break
-      } else if (status === 'FAILED') {
-        throw new Error('Music generation failed')
+      
+      if (status === 'FAILED') {
+        return new Response(
+          JSON.stringify({ status: 'FAILED', error: 'Music generation failed' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
       }
-      // Continue polling for PENDING, PROCESSING, etc.
+
+      if (status !== 'SUCCESS') {
+        return new Response(
+          JSON.stringify({ status: status || 'PENDING', taskId }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      // SUCCESS - Download and save the music
+      const sunoData = statusData.data.response?.sunoData?.[0]
+      if (!sunoData?.audioUrl) {
+        throw new Error('No audio URL in response')
+      }
+
+      console.log('Music generated, downloading from:', sunoData.audioUrl)
+
+      const audioResponse = await fetch(sunoData.audioUrl)
+      if (!audioResponse.ok) {
+        throw new Error('Failed to download audio')
+      }
+      const audioBlob = await audioResponse.arrayBuffer()
+      console.log('Downloaded audio size:', audioBlob.byteLength, 'bytes')
+
+      const supabase = createClient(
+        Deno.env.get('SUPABASE_URL') ?? '',
+        Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+      )
+
+      const fileName = `music_${Date.now()}_${Math.random().toString(36).substring(7)}.mp3`
+      const filePath = `generated/${fileName}`
+
+      const { error: uploadError } = await supabase.storage
+        .from('music')
+        .upload(filePath, audioBlob, {
+          contentType: 'audio/mpeg',
+          upsert: false
+        })
+
+      if (uploadError) {
+        console.error('Storage upload error:', uploadError)
+        throw new Error(`Upload failed: ${uploadError.message}`)
+      }
+
+      const { data: urlData } = supabase.storage
+        .from('music')
+        .getPublicUrl(filePath)
+
+      const { data: dbData, error: dbError } = await supabase
+        .from('generated_music')
+        .insert({
+          prompt: prompt,
+          file_path: filePath,
+          file_url: urlData.publicUrl,
+          duration_seconds: Math.round(sunoData.duration || 60)
+        })
+        .select()
+        .single()
+
+      if (dbError) {
+        console.error('Database insert error:', dbError)
+        throw new Error(`Database error: ${dbError.message}`)
+      }
+
+      console.log('Saved to database:', dbData.id)
+
+      return new Response(
+        JSON.stringify({ 
+          status: 'SUCCESS',
+          music: dbData
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
     }
-
-    if (!taskData) {
-      throw new Error('Generation timed out')
-    }
-
-    // Get the first generated track
-    const sunoData = taskData.response?.sunoData?.[0]
-    if (!sunoData?.audioUrl) {
-      throw new Error('No audio URL in response')
-    }
-
-    console.log('Music generated, downloading from:', sunoData.audioUrl)
-
-    // Download the audio file
-    const audioResponse = await fetch(sunoData.audioUrl)
-    if (!audioResponse.ok) {
-      throw new Error('Failed to download audio')
-    }
-    const audioBlob = await audioResponse.arrayBuffer()
-    console.log('Downloaded audio size:', audioBlob.byteLength, 'bytes')
-
-    // Create Supabase client
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    )
-
-    // Generate unique filename
-    const fileName = `music_${Date.now()}_${Math.random().toString(36).substring(7)}.mp3`
-    const filePath = `generated/${fileName}`
-
-    // Upload to storage
-    const { data: uploadData, error: uploadError } = await supabase.storage
-      .from('music')
-      .upload(filePath, audioBlob, {
-        contentType: 'audio/mpeg',
-        upsert: false
-      })
-
-    if (uploadError) {
-      console.error('Storage upload error:', uploadError)
-      throw new Error(`Upload failed: ${uploadError.message}`)
-    }
-
-    console.log('Uploaded to storage:', filePath)
-
-    // Get public URL
-    const { data: urlData } = supabase.storage
-      .from('music')
-      .getPublicUrl(filePath)
-
-    const fileUrl = urlData.publicUrl
-
-    // Save to database
-    const { data: dbData, error: dbError } = await supabase
-      .from('generated_music')
-      .insert({
-        prompt,
-        file_path: filePath,
-        file_url: fileUrl,
-        duration_seconds: Math.round(sunoData.duration || 60)
-      })
-      .select()
-      .single()
-
-    if (dbError) {
-      console.error('Database insert error:', dbError)
-      throw new Error(`Database error: ${dbError.message}`)
-    }
-
-    console.log('Saved to database:', dbData.id)
 
     return new Response(
-      JSON.stringify({ 
-        success: true,
-        music: dbData
-      }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      JSON.stringify({ error: 'Invalid action' }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
     )
 
   } catch (error) {
-    console.error('Error generating music:', error)
-    const message = error instanceof Error ? error.message : 'Failed to generate music'
+    console.error('Error:', error)
+    const message = error instanceof Error ? error.message : 'Failed to process request'
     return new Response(
       JSON.stringify({ error: message }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }

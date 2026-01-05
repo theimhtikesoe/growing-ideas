@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Terminal, Loader2, Music, Sparkles, Play, Pause, Download, Trash2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
@@ -12,17 +12,24 @@ interface GeneratedMusic {
   created_at: string;
 }
 
+type GenerationStatus = 'idle' | 'starting' | 'pending' | 'processing' | 'success' | 'failed';
+
 const AIConsole = () => {
   const [prompt, setPrompt] = useState('');
-  const [status, setStatus] = useState('System Ready...');
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [generationStatus, setGenerationStatus] = useState<GenerationStatus>('idle');
   const [savedMusic, setSavedMusic] = useState<GeneratedMusic[]>([]);
   const [currentlyPlaying, setCurrentlyPlaying] = useState<string | null>(null);
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
+  const [elapsedTime, setElapsedTime] = useState(0);
+  const pollingRef = useRef<NodeJS.Timeout | null>(null);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Fetch saved music on mount
   useEffect(() => {
     fetchSavedMusic();
+    return () => {
+      if (pollingRef.current) clearInterval(pollingRef.current);
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
   }, []);
 
   const fetchSavedMusic = async () => {
@@ -36,24 +43,36 @@ const AIConsole = () => {
       console.error('Error fetching music:', error);
       return;
     }
-
     setSavedMusic(data || []);
   };
 
-  const generateMusic = async () => {
-    if (!prompt.trim() || isGenerating) return;
+  const startTimer = () => {
+    setElapsedTime(0);
+    timerRef.current = setInterval(() => {
+      setElapsedTime(prev => prev + 1);
+    }, 1000);
+  };
 
-    setIsGenerating(true);
-    setStatus('>> Initializing MusicGen AI...');
+  const stopTimer = () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  const generateMusic = async () => {
+    if (!prompt.trim() || generationStatus !== 'idle') return;
+
+    setGenerationStatus('starting');
+    startTimer();
 
     try {
+      // Step 1: Start generation
       const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-music`,
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-music?action=generate`,
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ prompt }),
         }
       );
@@ -61,39 +80,58 @@ const AIConsole = () => {
       const data = await response.json();
 
       if (!response.ok) {
-        if (data.loading) {
-          setStatus('>> Model warming up... Please wait 20-30 seconds and try again.');
-          toast.info('AI model is loading. Please wait a moment and try again.');
-        } else {
-          throw new Error(data.error || 'Generation failed');
-        }
-        setIsGenerating(false);
-        return;
+        throw new Error(data.error || 'Failed to start generation');
       }
 
-      setStatus('>> Generation Complete! Music saved to library.');
-      toast.success('Music generated successfully!');
-      
-      // Refresh saved music list
-      await fetchSavedMusic();
-      
-      // Auto-play the new track
-      if (data.music?.file_url) {
-        playMusic(data.music.id, data.music.file_url);
-      }
-      
+      const taskId = data.taskId;
+      const currentPrompt = prompt;
       setPrompt('');
+      setGenerationStatus('pending');
+
+      // Step 2: Poll for status
+      pollingRef.current = setInterval(async () => {
+        try {
+          const statusResponse = await fetch(
+            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-music?action=status&taskId=${taskId}&prompt=${encodeURIComponent(currentPrompt)}`,
+            { method: 'GET' }
+          );
+
+          const statusData = await statusResponse.json();
+
+          if (statusData.status === 'PROCESSING') {
+            setGenerationStatus('processing');
+          } else if (statusData.status === 'SUCCESS') {
+            clearInterval(pollingRef.current!);
+            pollingRef.current = null;
+            stopTimer();
+            setGenerationStatus('idle');
+            toast.success('Music generated successfully!');
+            await fetchSavedMusic();
+            
+            if (statusData.music?.file_url) {
+              playMusic(statusData.music.id, statusData.music.file_url);
+            }
+          } else if (statusData.status === 'FAILED') {
+            clearInterval(pollingRef.current!);
+            pollingRef.current = null;
+            stopTimer();
+            setGenerationStatus('idle');
+            toast.error('Music generation failed');
+          }
+        } catch (err) {
+          console.error('Status check error:', err);
+        }
+      }, 5000);
+
     } catch (error) {
       console.error('Error:', error);
-      setStatus(`>> Error: ${error instanceof Error ? error.message : 'Generation failed'}`);
-      toast.error('Failed to generate music');
-    } finally {
-      setIsGenerating(false);
+      stopTimer();
+      setGenerationStatus('idle');
+      toast.error(error instanceof Error ? error.message : 'Failed to generate music');
     }
   };
 
   const playMusic = (id: string, url: string) => {
-    // Stop current audio if playing
     if (audioElement) {
       audioElement.pause();
       audioElement.currentTime = 0;
@@ -119,8 +157,7 @@ const AIConsole = () => {
     setCurrentlyPlaying(null);
   };
 
-  const deleteMusic = async (id: string, filePath: string) => {
-    // Stop if currently playing
+  const deleteMusic = async (id: string) => {
     if (currentlyPlaying === id) {
       stopMusic();
     }
@@ -138,6 +175,22 @@ const AIConsole = () => {
     toast.success('Track deleted');
     await fetchSavedMusic();
   };
+
+  const getStatusMessage = () => {
+    const time = `[${elapsedTime}s]`;
+    switch (generationStatus) {
+      case 'starting':
+        return `${time} >> Initializing AI music generation...`;
+      case 'pending':
+        return `${time} >> Request queued, waiting for AI...`;
+      case 'processing':
+        return `${time} >> AI is composing your music...`;
+      default:
+        return '>> System Ready...';
+    }
+  };
+
+  const isGenerating = generationStatus !== 'idle';
 
   return (
     <motion.div
@@ -164,7 +217,7 @@ const AIConsole = () => {
         <div className="p-6 space-y-4">
           <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
             <Sparkles className="w-4 h-4 text-primary" />
-            <span>Enter a prompt to generate AI music (Free API - may have rate limits)</span>
+            <span>Enter a prompt to generate AI music (Suno AI - ~1-2 min generation time)</span>
           </div>
 
           <div className="flex gap-2">
@@ -193,12 +246,39 @@ const AIConsole = () => {
             </NeonButton>
           </div>
 
-          {/* Status Log */}
-          <div className="bg-background/50 rounded p-4 border border-border/50 min-h-[60px]">
+          {/* Progress Status */}
+          <div className="bg-background/50 rounded p-4 border border-border/50 min-h-[80px]">
             <p className={`text-sm font-mono ${isGenerating ? 'text-primary' : 'text-muted-foreground'}`}>
-              {status}
+              {getStatusMessage()}
               {isGenerating && <span className="cursor-blink" />}
             </p>
+            
+            {isGenerating && (
+              <div className="mt-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+                    <motion.div
+                      className="h-full bg-primary"
+                      initial={{ width: '0%' }}
+                      animate={{ 
+                        width: generationStatus === 'starting' ? '10%' : 
+                               generationStatus === 'pending' ? '30%' : 
+                               generationStatus === 'processing' ? '70%' : '0%'
+                      }}
+                      transition={{ duration: 0.5 }}
+                    />
+                  </div>
+                  <span className="text-xs text-muted-foreground w-12">
+                    {generationStatus === 'starting' ? '10%' : 
+                     generationStatus === 'pending' ? '30%' : 
+                     generationStatus === 'processing' ? '70%' : '0%'}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  ⏱️ Usually takes 1-2 minutes. Please wait...
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Saved Music Library */}
@@ -240,7 +320,7 @@ const AIConsole = () => {
                         <Download className="w-4 h-4 text-muted-foreground" />
                       </a>
                       <button
-                        onClick={() => deleteMusic(track.id, track.file_url)}
+                        onClick={() => deleteMusic(track.id)}
                         className="p-2 rounded hover:bg-destructive/20 transition-colors"
                         title="Delete"
                       >
@@ -255,7 +335,7 @@ const AIConsole = () => {
 
           {/* Info Notice */}
           <p className="text-xs text-muted-foreground text-center">
-            🎵 Using Hugging Face MusicGen (Free tier - first request may take 20-30s to warm up)
+            🎵 Powered by Suno AI via Kie.ai API
           </p>
         </div>
       </div>

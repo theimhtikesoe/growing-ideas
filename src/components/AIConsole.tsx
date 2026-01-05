@@ -334,7 +334,7 @@ const AIConsole = () => {
                   {preset}
                 </button>)}
             </div>
-            <input type="text" value={style} onChange={e => setStyle(e.target.value)} placeholder="Or type custom style..." className="w-full bg-input border border-border rounded px-3 py-2 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors font-mono text-sm" disabled={isGenerating} maxLength={50} />
+            <input type="text" value={style} onChange={e => setStyle(e.target.value)} className="w-full bg-input border border-border rounded px-3 py-2 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors font-mono text-sm" disabled={isGenerating} maxLength={50} placeholder="" />
           </div>
 
           {/* Lyrics Input */}

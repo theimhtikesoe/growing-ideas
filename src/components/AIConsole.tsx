@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Terminal, Loader2, Music, Sparkles, Play, Pause, Download, Trash2, Mic2, Palette, Type, Shuffle, Heart, Share2 } from 'lucide-react';
+import { Terminal, Loader2, Music, Sparkles, Play, Pause, Download, Trash2, Mic2, Palette, Type, Shuffle, Heart, Share2, Image, Wand2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import NeonButton from './NeonButton';
@@ -13,6 +13,7 @@ interface GeneratedMusic {
   style?: string;
   file_url: string;
   created_at: string;
+  thumbnail_url?: string;
 }
 type GenerationStatus = 'idle' | 'starting' | 'pending' | 'processing' | 'success' | 'failed';
 const STYLE_PRESETS = ['Lo-fi Hip Hop', 'Synthwave', 'Epic Orchestral', 'Jazz Fusion', 'Acoustic Folk', 'Electronic Dance', 'Cinematic Ambient', 'Rock Ballad'];
@@ -41,7 +42,10 @@ const AIConsole = () => {
   const [title, setTitle] = useState('');
   const [lyrics, setLyrics] = useState('');
   const [style, setStyle] = useState('');
+  const [thumbnailPrompt, setThumbnailPrompt] = useState('');
   const [generationStatus, setGenerationStatus] = useState<GenerationStatus>('idle');
+  const [thumbnailStatus, setThumbnailStatus] = useState<'idle' | 'generating'>('idle');
+  const [generatedThumbnail, setGeneratedThumbnail] = useState<string | null>(null);
   const [savedMusic, setSavedMusic] = useState<GeneratedMusic[]>([]);
   const [currentlyPlaying, setCurrentlyPlaying] = useState<string | null>(null);
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
@@ -260,8 +264,46 @@ const AIConsole = () => {
     setTitle(random.title);
     setStyle(random.style);
     setLyrics(random.lyrics);
+    setThumbnailPrompt(`A vibrant YouTube thumbnail for "${random.title}" - ${random.style} music vibes`);
     setShowAdvanced(true);
     toast.success('✨ Surprise prompt loaded!');
+  };
+
+  const generateThumbnail = async () => {
+    if (thumbnailStatus === 'generating') return;
+    
+    const prompt = thumbnailPrompt || `YouTube thumbnail for "${title || 'Music'}" - ${style || 'modern'} style`;
+    
+    setThumbnailStatus('generating');
+    setGeneratedThumbnail(null);
+    
+    try {
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-thumbnail`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          prompt,
+          title,
+          style
+        })
+      });
+
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to generate thumbnail');
+      }
+
+      setGeneratedThumbnail(data.imageUrl);
+      toast.success('🎨 Thumbnail generated!');
+    } catch (error) {
+      console.error('Thumbnail error:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to generate thumbnail');
+    } finally {
+      setThumbnailStatus('idle');
+    }
   };
   const getStatusMessage = () => {
     const time = `[${elapsedTime}s]`;
@@ -347,6 +389,85 @@ const AIConsole = () => {
             <div className="text-xs text-muted-foreground text-right">
               {lyrics.length}/500
             </div>
+          </div>
+
+          {/* Thumbnail Prompt */}
+          <div className="space-y-2 p-4 bg-gradient-to-r from-pink-500/10 to-purple-500/10 rounded-lg border border-pink-500/20">
+            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Image className="w-3 h-3" />
+              YouTube Thumbnail Prompt
+            </label>
+            <textarea
+              value={thumbnailPrompt}
+              onChange={e => setThumbnailPrompt(e.target.value)}
+              className="w-full bg-input border border-border rounded px-3 py-2 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors font-mono text-sm min-h-[60px] resize-none"
+              disabled={thumbnailStatus === 'generating'}
+              maxLength={300}
+              placeholder="Describe your YouTube thumbnail... e.g., 'Neon cityscape with glowing music notes, cyberpunk style'"
+            />
+            <div className="flex items-center justify-between">
+              <div className="text-xs text-muted-foreground">
+                {thumbnailPrompt.length}/300
+              </div>
+              <button
+                onClick={generateThumbnail}
+                disabled={thumbnailStatus === 'generating'}
+                className="flex items-center gap-2 px-3 py-1.5 text-xs bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 text-white rounded-md transition-all disabled:opacity-50"
+              >
+                {thumbnailStatus === 'generating' ? (
+                  <>
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <Wand2 className="w-3 h-3" />
+                    Generate Thumbnail
+                  </>
+                )}
+              </button>
+            </div>
+            
+            {/* Generated Thumbnail Preview */}
+            <AnimatePresence>
+              {generatedThumbnail && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  className="mt-3"
+                >
+                  <p className="text-xs text-primary mb-2">✨ Generated Thumbnail:</p>
+                  <div className="relative group">
+                    <img
+                      src={generatedThumbnail}
+                      alt="Generated thumbnail"
+                      className="w-full max-w-md rounded-lg border border-primary/30 shadow-lg"
+                    />
+                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center gap-2">
+                      <a
+                        href={generatedThumbnail}
+                        download="thumbnail.png"
+                        className="p-2 bg-primary rounded-full text-primary-foreground hover:bg-primary/80 transition-colors"
+                        title="Download"
+                      >
+                        <Download className="w-4 h-4" />
+                      </a>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(generatedThumbnail);
+                          toast.success('Thumbnail URL copied!');
+                        }}
+                        className="p-2 bg-primary rounded-full text-primary-foreground hover:bg-primary/80 transition-colors"
+                        title="Copy URL"
+                      >
+                        <Share2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
           {/* Generate Button */}

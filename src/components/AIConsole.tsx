@@ -1,26 +1,47 @@
 import { useState, useEffect, useRef } from 'react';
-import { motion } from 'framer-motion';
-import { Terminal, Loader2, Music, Sparkles, Play, Pause, Download, Trash2 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Terminal, Loader2, Music, Sparkles, Play, Pause, Download, Trash2, Mic2, Palette, Type, Shuffle, Heart, Share2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import NeonButton from './NeonButton';
+import WaveformVisualizer from './WaveformVisualizer';
 
 interface GeneratedMusic {
   id: string;
   prompt: string;
+  title?: string;
+  lyrics?: string;
+  style?: string;
   file_url: string;
   created_at: string;
 }
 
 type GenerationStatus = 'idle' | 'starting' | 'pending' | 'processing' | 'success' | 'failed';
 
+const STYLE_PRESETS = [
+  'Lo-fi Hip Hop', 'Synthwave', 'Epic Orchestral', 'Jazz Fusion', 
+  'Acoustic Folk', 'Electronic Dance', 'Cinematic Ambient', 'Rock Ballad'
+];
+
+const SURPRISE_PROMPTS = [
+  { title: 'Neon Dreams', style: 'Synthwave', lyrics: 'City lights, endless nights, chasing electric dreams' },
+  { title: 'Ocean Whispers', style: 'Ambient', lyrics: 'Waves of calm, washing over me, peaceful serenity' },
+  { title: 'Midnight Drive', style: 'Lo-fi', lyrics: 'Empty roads, starlit sky, just you and I' },
+  { title: 'Phoenix Rising', style: 'Epic Orchestral', lyrics: 'From the ashes we rise, reaching for the skies' },
+  { title: 'Coffee Shop Vibes', style: 'Jazz', lyrics: 'Warm cup of memories, rainy afternoon melodies' },
+];
+
 const AIConsole = () => {
-  const [prompt, setPrompt] = useState('');
+  const [title, setTitle] = useState('');
+  const [lyrics, setLyrics] = useState('');
+  const [style, setStyle] = useState('');
   const [generationStatus, setGenerationStatus] = useState<GenerationStatus>('idle');
   const [savedMusic, setSavedMusic] = useState<GeneratedMusic[]>([]);
   const [currentlyPlaying, setCurrentlyPlaying] = useState<string | null>(null);
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
   const [elapsedTime, setElapsedTime] = useState(0);
+  const [favorites, setFavorites] = useState<Set<string>>(new Set());
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -60,20 +81,38 @@ const AIConsole = () => {
     }
   };
 
+  const buildPrompt = () => {
+    const parts = [];
+    if (title) parts.push(`Title: ${title}`);
+    if (style) parts.push(`Style: ${style}`);
+    if (lyrics) parts.push(`Lyrics: ${lyrics}`);
+    return parts.join('. ') || 'Create an instrumental track';
+  };
+
   const generateMusic = async () => {
-    if (!prompt.trim() || generationStatus !== 'idle') return;
+    if (generationStatus !== 'idle') return;
+
+    const fullPrompt = buildPrompt();
+    if (!fullPrompt.trim() || fullPrompt === 'Create an instrumental track') {
+      toast.error('Please add a title, style, or lyrics');
+      return;
+    }
 
     setGenerationStatus('starting');
     startTimer();
 
     try {
-      // Step 1: Start generation
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-music?action=generate`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt }),
+          body: JSON.stringify({ 
+            prompt: fullPrompt,
+            title,
+            lyrics,
+            style
+          }),
         }
       );
 
@@ -84,11 +123,15 @@ const AIConsole = () => {
       }
 
       const taskId = data.taskId;
-      const currentPrompt = prompt;
-      setPrompt('');
+      const currentPrompt = fullPrompt;
+      
+      // Clear form
+      setTitle('');
+      setLyrics('');
+      setStyle('');
       setGenerationStatus('pending');
 
-      // Step 2: Poll for status
+      // Poll for status
       pollingRef.current = setInterval(async () => {
         try {
           const statusResponse = await fetch(
@@ -105,7 +148,7 @@ const AIConsole = () => {
             pollingRef.current = null;
             stopTimer();
             setGenerationStatus('idle');
-            toast.success('Music generated successfully!');
+            toast.success('🎵 Music generated successfully!');
             await fetchSavedMusic();
             
             if (statusData.music?.file_url) {
@@ -135,6 +178,7 @@ const AIConsole = () => {
     if (audioElement) {
       audioElement.pause();
       audioElement.currentTime = 0;
+      setAudioElement(null);
     }
 
     if (currentlyPlaying === id) {
@@ -143,8 +187,12 @@ const AIConsole = () => {
     }
 
     const audio = new Audio(url);
-    audio.onended = () => setCurrentlyPlaying(null);
-    audio.play();
+    audio.crossOrigin = 'anonymous';
+    audio.onended = () => {
+      setCurrentlyPlaying(null);
+      setAudioElement(null);
+    };
+    audio.play().catch(console.error);
     setAudioElement(audio);
     setCurrentlyPlaying(id);
   };
@@ -153,15 +201,41 @@ const AIConsole = () => {
     if (audioElement) {
       audioElement.pause();
       audioElement.currentTime = 0;
+      setAudioElement(null);
     }
     setCurrentlyPlaying(null);
   };
 
-  const deleteMusic = async (id: string) => {
+  const deleteMusic = async (id: string, filePath?: string) => {
     if (currentlyPlaying === id) {
       stopMusic();
     }
 
+    // First get the file_path if not provided
+    let pathToDelete = filePath;
+    if (!pathToDelete) {
+      const track = savedMusic.find(t => t.id === id);
+      if (track) {
+        // Extract path from URL
+        const urlParts = track.file_url.split('/music/');
+        if (urlParts.length > 1) {
+          pathToDelete = urlParts[1];
+        }
+      }
+    }
+
+    // Delete from storage first
+    if (pathToDelete) {
+      const { error: storageError } = await supabase.storage
+        .from('music')
+        .remove([pathToDelete]);
+      
+      if (storageError) {
+        console.error('Storage delete error:', storageError);
+      }
+    }
+
+    // Delete from database
     const { error } = await supabase
       .from('generated_music')
       .delete()
@@ -172,21 +246,59 @@ const AIConsole = () => {
       return;
     }
 
+    // Update local state immediately
+    setSavedMusic(prev => prev.filter(track => track.id !== id));
+    setFavorites(prev => {
+      const newFavs = new Set(prev);
+      newFavs.delete(id);
+      return newFavs;
+    });
+    
     toast.success('Track deleted');
-    await fetchSavedMusic();
+  };
+
+  const toggleFavorite = (id: string) => {
+    setFavorites(prev => {
+      const newFavs = new Set(prev);
+      if (newFavs.has(id)) {
+        newFavs.delete(id);
+      } else {
+        newFavs.add(id);
+        toast.success('Added to favorites!');
+      }
+      return newFavs;
+    });
+  };
+
+  const shareTrack = async (track: GeneratedMusic) => {
+    try {
+      await navigator.clipboard.writeText(track.file_url);
+      toast.success('Link copied to clipboard!');
+    } catch {
+      toast.error('Failed to copy link');
+    }
+  };
+
+  const surpriseMe = () => {
+    const random = SURPRISE_PROMPTS[Math.floor(Math.random() * SURPRISE_PROMPTS.length)];
+    setTitle(random.title);
+    setStyle(random.style);
+    setLyrics(random.lyrics);
+    setShowAdvanced(true);
+    toast.success('✨ Surprise prompt loaded!');
   };
 
   const getStatusMessage = () => {
     const time = `[${elapsedTime}s]`;
     switch (generationStatus) {
       case 'starting':
-        return `${time} >> Initializing AI music generation...`;
+        return `${time} >> Initializing AI composer...`;
       case 'pending':
-        return `${time} >> Request queued, waiting for AI...`;
+        return `${time} >> Request queued, AI is warming up...`;
       case 'processing':
-        return `${time} >> AI is composing your music...`;
+        return `${time} >> 🎼 Composing your masterpiece...`;
       default:
-        return '>> System Ready...';
+        return '>> Ready to create music...';
     }
   };
 
@@ -209,125 +321,248 @@ const AIConsole = () => {
           </div>
           <span className="flex items-center gap-2 text-xs text-muted-foreground ml-2">
             <Terminal className="w-3 h-3" />
-            ai-audio-synth.exe
+            ai-music-studio.exe
           </span>
+          <button
+            onClick={surpriseMe}
+            className="ml-auto flex items-center gap-1 px-2 py-1 text-xs bg-primary/20 hover:bg-primary/30 text-primary rounded transition-colors"
+            disabled={isGenerating}
+          >
+            <Shuffle className="w-3 h-3" />
+            Surprise Me
+          </button>
         </div>
 
         {/* Terminal Body */}
         <div className="p-6 space-y-4">
           <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
             <Sparkles className="w-4 h-4 text-primary" />
-            <span>Enter a prompt to generate AI music (Suno AI - ~1-2 min generation time)</span>
+            <span>Create AI-powered music with title, lyrics & style</span>
           </div>
 
-          <div className="flex gap-2">
-            <div className="flex-1 relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-primary">{'>'}</span>
+          {/* Title Input */}
+          <div className="space-y-2">
+            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Type className="w-3 h-3" />
+              Song Title
+            </label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-primary">🎵</span>
               <input
                 type="text"
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && generateMusic()}
-                placeholder="lo-fi beats, relaxing piano melody..."
-                className="w-full bg-input border border-border rounded px-8 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors font-mono text-sm"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="My Awesome Song..."
+                className="w-full bg-input border border-border rounded px-8 py-2 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors font-mono text-sm"
                 disabled={isGenerating}
+                maxLength={100}
               />
             </div>
-            <NeonButton
-              onClick={generateMusic}
-              disabled={isGenerating || !prompt.trim()}
-              className="whitespace-nowrap"
-            >
-              {isGenerating ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                'GENERATE'
-              )}
-            </NeonButton>
           </div>
 
-          {/* Progress Status */}
-          <div className="bg-background/50 rounded p-4 border border-border/50 min-h-[80px]">
-            <p className={`text-sm font-mono ${isGenerating ? 'text-primary' : 'text-muted-foreground'}`}>
-              {getStatusMessage()}
-              {isGenerating && <span className="cursor-blink" />}
-            </p>
-            
-            {isGenerating && (
-              <div className="mt-3 space-y-2">
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-                    <motion.div
-                      className="h-full bg-primary"
-                      initial={{ width: '0%' }}
-                      animate={{ 
-                        width: generationStatus === 'starting' ? '10%' : 
-                               generationStatus === 'pending' ? '30%' : 
-                               generationStatus === 'processing' ? '70%' : '0%'
-                      }}
-                      transition={{ duration: 0.5 }}
-                    />
-                  </div>
-                  <span className="text-xs text-muted-foreground w-12">
-                    {generationStatus === 'starting' ? '10%' : 
-                     generationStatus === 'pending' ? '30%' : 
-                     generationStatus === 'processing' ? '70%' : '0%'}
-                  </span>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  ⏱️ Usually takes 1-2 minutes. Please wait...
-                </p>
-              </div>
-            )}
+          {/* Style Selection */}
+          <div className="space-y-2">
+            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Palette className="w-3 h-3" />
+              Music Style
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {STYLE_PRESETS.map((preset) => (
+                <button
+                  key={preset}
+                  onClick={() => setStyle(style === preset ? '' : preset)}
+                  disabled={isGenerating}
+                  className={`px-3 py-1 text-xs rounded-full transition-all ${
+                    style === preset 
+                      ? 'bg-primary text-primary-foreground' 
+                      : 'bg-muted hover:bg-muted/80 text-muted-foreground'
+                  }`}
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
+            <input
+              type="text"
+              value={style}
+              onChange={(e) => setStyle(e.target.value)}
+              placeholder="Or type custom style..."
+              className="w-full bg-input border border-border rounded px-3 py-2 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors font-mono text-sm"
+              disabled={isGenerating}
+              maxLength={50}
+            />
           </div>
+
+          {/* Lyrics Input */}
+          <div className="space-y-2">
+            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Mic2 className="w-3 h-3" />
+              Lyrics / Mood (optional)
+            </label>
+            <textarea
+              value={lyrics}
+              onChange={(e) => setLyrics(e.target.value)}
+              placeholder="Write your lyrics or describe the mood...&#10;e.g., 'Feeling free, under starlit skies, dancing with the moon'"
+              className="w-full bg-input border border-border rounded px-3 py-2 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors font-mono text-sm min-h-[80px] resize-none"
+              disabled={isGenerating}
+              maxLength={500}
+            />
+            <div className="text-xs text-muted-foreground text-right">
+              {lyrics.length}/500
+            </div>
+          </div>
+
+          {/* Generate Button */}
+          <NeonButton
+            onClick={generateMusic}
+            disabled={isGenerating || (!title && !style && !lyrics)}
+            className="w-full justify-center"
+          >
+            {isGenerating ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                GENERATING...
+              </>
+            ) : (
+              <>
+                <Music className="w-4 h-4 mr-2" />
+                CREATE MUSIC
+              </>
+            )}
+          </NeonButton>
+
+          {/* Progress Status */}
+          <AnimatePresence>
+            {isGenerating && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="bg-background/50 rounded p-4 border border-primary/30"
+              >
+                <p className="text-sm font-mono text-primary">
+                  {getStatusMessage()}
+                  <span className="animate-pulse">▊</span>
+                </p>
+                
+                <div className="mt-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+                      <motion.div
+                        className="h-full bg-gradient-to-r from-primary via-pink-500 to-blue-500"
+                        initial={{ width: '0%' }}
+                        animate={{ 
+                          width: generationStatus === 'starting' ? '15%' : 
+                                 generationStatus === 'pending' ? '35%' : 
+                                 generationStatus === 'processing' ? '75%' : '0%'
+                        }}
+                        transition={{ duration: 0.5 }}
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    ⏱️ Usually takes 1-2 minutes. Your masterpiece is worth the wait!
+                  </p>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Waveform Visualizer */}
+          {currentlyPlaying && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="p-4 bg-black/30 rounded-lg border border-primary/20"
+            >
+              <div className="flex items-center gap-2 mb-2">
+                <Music className="w-4 h-4 text-primary animate-pulse" />
+                <span className="text-xs text-primary">Now Playing</span>
+              </div>
+              <WaveformVisualizer 
+                audioElement={audioElement}
+                isPlaying={!!currentlyPlaying}
+              />
+            </motion.div>
+          )}
 
           {/* Saved Music Library */}
           {savedMusic.length > 0 && (
             <div className="space-y-2">
               <h4 className="text-sm font-semibold text-primary flex items-center gap-2">
                 <Music className="w-4 h-4" />
-                Your Music Library
+                Your Music Library ({savedMusic.length})
               </h4>
-              <div className="max-h-[200px] overflow-y-auto space-y-2">
+              <div className="max-h-[250px] overflow-y-auto space-y-2 pr-1">
                 {savedMusic.map((track) => (
-                  <div
+                  <motion.div
                     key={track.id}
-                    className="flex items-center gap-3 p-3 bg-muted/30 rounded border border-border/50 hover:border-primary/50 transition-colors"
+                    layout
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: 20 }}
+                    className={`flex items-center gap-3 p-3 rounded border transition-all ${
+                      currentlyPlaying === track.id 
+                        ? 'bg-primary/10 border-primary/50' 
+                        : 'bg-muted/30 border-border/50 hover:border-primary/30'
+                    }`}
                   >
                     <button
                       onClick={() => playMusic(track.id, track.file_url)}
-                      className="p-2 rounded-full bg-primary/20 hover:bg-primary/30 transition-colors"
+                      className={`p-2 rounded-full transition-colors ${
+                        currentlyPlaying === track.id 
+                          ? 'bg-primary text-primary-foreground' 
+                          : 'bg-primary/20 hover:bg-primary/30'
+                      }`}
                     >
                       {currentlyPlaying === track.id ? (
-                        <Pause className="w-4 h-4 text-primary" />
+                        <Pause className="w-4 h-4" />
                       ) : (
                         <Play className="w-4 h-4 text-primary" />
                       )}
                     </button>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm text-foreground truncate">{track.prompt}</p>
+                      <p className="text-sm text-foreground truncate font-medium">
+                        {track.prompt.split('.')[0] || 'Untitled Track'}
+                      </p>
                       <p className="text-xs text-muted-foreground">
-                        {new Date(track.created_at).toLocaleDateString()}
+                        {new Date(track.created_at).toLocaleDateString()} • {new Date(track.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </p>
                     </div>
                     <div className="flex gap-1">
+                      <button
+                        onClick={() => toggleFavorite(track.id)}
+                        className={`p-2 rounded transition-colors ${
+                          favorites.has(track.id) ? 'text-pink-500' : 'text-muted-foreground hover:text-pink-500'
+                        }`}
+                        title="Favorite"
+                      >
+                        <Heart className={`w-4 h-4 ${favorites.has(track.id) ? 'fill-current' : ''}`} />
+                      </button>
+                      <button
+                        onClick={() => shareTrack(track)}
+                        className="p-2 rounded text-muted-foreground hover:text-blue-500 transition-colors"
+                        title="Share"
+                      >
+                        <Share2 className="w-4 h-4" />
+                      </button>
                       <a
                         href={track.file_url}
                         download
-                        className="p-2 rounded hover:bg-muted transition-colors"
+                        className="p-2 rounded text-muted-foreground hover:text-green-500 transition-colors"
                         title="Download"
                       >
-                        <Download className="w-4 h-4 text-muted-foreground" />
+                        <Download className="w-4 h-4" />
                       </a>
                       <button
                         onClick={() => deleteMusic(track.id)}
-                        className="p-2 rounded hover:bg-destructive/20 transition-colors"
+                        className="p-2 rounded text-muted-foreground hover:text-destructive transition-colors"
                         title="Delete"
                       >
-                        <Trash2 className="w-4 h-4 text-muted-foreground hover:text-destructive" />
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
-                  </div>
+                  </motion.div>
                 ))}
               </div>
             </div>
@@ -335,7 +570,7 @@ const AIConsole = () => {
 
           {/* Info Notice */}
           <p className="text-xs text-muted-foreground text-center">
-            🎵 Powered by Suno AI via Kie.ai API
+            🎵 Powered by Suno AI • Create unlimited music with AI
           </p>
         </div>
       </div>

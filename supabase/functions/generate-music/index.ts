@@ -24,9 +24,9 @@ serve(async (req) => {
 
     console.log('Generating music for prompt:', prompt)
 
-    // Use Hugging Face's free inference API for MusicGen
+    // Use Hugging Face's router API for MusicGen (new endpoint)
     const response = await fetch(
-      'https://api-inference.huggingface.co/models/facebook/musicgen-small',
+      'https://router.huggingface.co/hf-inference/models/facebook/musicgen-small',
       {
         method: 'POST',
         headers: {
@@ -34,9 +34,6 @@ serve(async (req) => {
         },
         body: JSON.stringify({
           inputs: prompt,
-          parameters: {
-            max_new_tokens: 256,
-          }
         }),
       }
     )

@@ -158,16 +158,35 @@ serve(async (req) => {
       const fileName = `music_${Date.now()}_${Math.random().toString(36).substring(7)}.mp3`
       const filePath = `generated/${fileName}`
 
-      const { error: uploadError } = await supabase.storage
-        .from('music')
-        .upload(filePath, audioBlob, {
-          contentType: 'audio/mpeg',
-          upsert: false
-        })
+      // Retry upload with exponential backoff for transient network errors
+      let uploadError = null
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        const { error } = await supabase.storage
+          .from('music')
+          .upload(filePath, audioBlob, {
+            contentType: 'audio/mpeg',
+            upsert: false
+          })
+        
+        if (!error) {
+          uploadError = null
+          console.log(`Upload succeeded on attempt ${attempt}`)
+          break
+        }
+        
+        uploadError = error
+        console.error(`Upload attempt ${attempt} failed:`, error.message)
+        
+        if (attempt < 3) {
+          const delay = attempt * 1000 // 1s, 2s
+          console.log(`Retrying in ${delay}ms...`)
+          await new Promise(resolve => setTimeout(resolve, delay))
+        }
+      }
 
       if (uploadError) {
-        console.error('Storage upload error:', uploadError)
-        throw new Error(`Upload failed: ${uploadError.message}`)
+        console.error('Storage upload failed after retries:', uploadError)
+        throw new Error(`Upload failed after 3 attempts: ${uploadError.message}`)
       }
 
       const { data: urlData } = supabase.storage

@@ -47,6 +47,7 @@ serve(async (req) => {
         customMode: false,
         instrumental: true,
         model: 'V3_5',
+        callBackUrl: 'https://example.com/callback', // Required by API, but we poll instead
       }),
     })
 

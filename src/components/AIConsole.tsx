@@ -17,6 +17,13 @@ interface GeneratedMusic {
 }
 type GenerationStatus = 'idle' | 'starting' | 'pending' | 'processing' | 'success' | 'failed';
 const STYLE_PRESETS = ['Lo-fi Hip Hop', 'Synthwave', 'Epic Orchestral', 'Jazz Fusion', 'Acoustic Folk', 'Electronic Dance', 'Cinematic Ambient', 'Rock Ballad'];
+const THUMBNAIL_STYLES = [
+  { name: 'Neon', prompt: 'neon glowing, cyberpunk style, bright colors, electric atmosphere' },
+  { name: 'Minimalist', prompt: 'clean minimalist design, simple shapes, subtle colors, elegant typography space' },
+  { name: 'Vintage', prompt: 'retro vintage aesthetic, warm colors, film grain texture, nostalgic vibe' },
+  { name: '3D', prompt: '3D rendered, glossy surfaces, depth and shadows, modern 3D art style' }
+];
+
 const SURPRISE_PROMPTS = [{
   title: 'Neon Dreams',
   style: 'Synthwave',
@@ -405,7 +412,25 @@ const AIConsole = () => {
               maxLength={300}
               placeholder="Describe your YouTube thumbnail... e.g., 'Neon cityscape with glowing music notes, cyberpunk style'"
             />
-            <div className="flex items-center justify-between">
+            
+            {/* Thumbnail Style Presets */}
+            <div className="flex flex-wrap gap-2 mt-2">
+              {THUMBNAIL_STYLES.map((stylePreset) => (
+                <button
+                  key={stylePreset.name}
+                  onClick={() => {
+                    const basePrompt = title ? `YouTube thumbnail for "${title}"` : 'YouTube music thumbnail';
+                    setThumbnailPrompt(`${basePrompt} - ${stylePreset.prompt}`);
+                  }}
+                  disabled={thumbnailStatus === 'generating'}
+                  className="px-3 py-1.5 text-xs rounded-full bg-gradient-to-r from-pink-500/20 to-purple-500/20 hover:from-pink-500/30 hover:to-purple-500/30 border border-pink-500/30 text-pink-300 transition-all disabled:opacity-50"
+                >
+                  {stylePreset.name}
+                </button>
+              ))}
+            </div>
+            
+            <div className="flex items-center justify-between mt-2">
               <div className="text-xs text-muted-foreground">
                 {thumbnailPrompt.length}/300
               </div>

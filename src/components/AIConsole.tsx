@@ -5,6 +5,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import NeonButton from './NeonButton';
 import WaveformVisualizer from './WaveformVisualizer';
+import VideoGenerator from './VideoGenerator';
 interface GeneratedMusic {
   id: string;
   prompt: string;
@@ -494,6 +495,13 @@ const AIConsole = () => {
               )}
             </AnimatePresence>
           </div>
+
+          {/* Video Generator */}
+          <VideoGenerator 
+            thumbnailUrl={generatedThumbnail} 
+            musicUrl={savedMusic[0]?.file_url || null}
+            title={title || savedMusic[0]?.prompt?.split('.')[0] || 'Music Video'}
+          />
 
           {/* Generate Button */}
           <NeonButton onClick={generateMusic} disabled={isGenerating || !title && !style && !lyrics} className="w-full justify-center">

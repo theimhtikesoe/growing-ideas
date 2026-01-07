@@ -16,7 +16,7 @@ interface GeneratedMusic {
   created_at: string;
   thumbnail_url?: string;
 }
-type GenerationStatus = 'idle' | 'starting' | 'pending' | 'processing' | 'success' | 'failed';
+
 const STYLE_PRESETS = ['Lo-fi Hip Hop', 'Synthwave', 'Epic Orchestral', 'Jazz Fusion', 'Acoustic Folk', 'Electronic Dance', 'Cinematic Ambient', 'Rock Ballad'];
 const THUMBNAIL_STYLES = [
   { name: 'Neon', prompt: 'neon glowing, cyberpunk style, bright colors, electric atmosphere' },
@@ -51,22 +51,20 @@ const AIConsole = () => {
   const [lyrics, setLyrics] = useState('');
   const [style, setStyle] = useState('');
   const [thumbnailPrompt, setThumbnailPrompt] = useState('');
-  const [generationStatus, setGenerationStatus] = useState<GenerationStatus>('idle');
+  const [generatedMusicPrompt, setGeneratedMusicPrompt] = useState<string | null>(null);
+  const [promptGenerating, setPromptGenerating] = useState(false);
   const [thumbnailStatus, setThumbnailStatus] = useState<'idle' | 'generating'>('idle');
   const [generatedThumbnail, setGeneratedThumbnail] = useState<string | null>(null);
   const [savedMusic, setSavedMusic] = useState<GeneratedMusic[]>([]);
   const [currentlyPlaying, setCurrentlyPlaying] = useState<string | null>(null);
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
-  const [elapsedTime, setElapsedTime] = useState(0);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [showAdvanced, setShowAdvanced] = useState(false);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
   useEffect(() => {
     fetchSavedMusic();
     return () => {
       if (pollingRef.current) clearInterval(pollingRef.current);
-      if (timerRef.current) clearInterval(timerRef.current);
     };
   }, []);
   const fetchSavedMusic = async () => {
@@ -82,95 +80,33 @@ const AIConsole = () => {
     }
     setSavedMusic(data || []);
   };
-  const startTimer = () => {
-    setElapsedTime(0);
-    timerRef.current = setInterval(() => {
-      setElapsedTime(prev => prev + 1);
-    }, 1000);
-  };
-  const stopTimer = () => {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-  };
-  const buildPrompt = () => {
-    const parts = [];
-    if (title) parts.push(`Title: ${title}`);
-    if (style) parts.push(`Style: ${style}`);
-    if (lyrics) parts.push(`Lyrics: ${lyrics}`);
-    return parts.join('. ') || 'Create an instrumental track';
-  };
-  const generateMusic = async () => {
-    if (generationStatus !== 'idle') return;
-    const fullPrompt = buildPrompt();
-    if (!fullPrompt.trim() || fullPrompt === 'Create an instrumental track') {
+  const generateMusicPrompt = async () => {
+    if (promptGenerating) return;
+    if (!title && !style && !lyrics) {
       toast.error('Please add a title, style, or lyrics');
       return;
     }
-    setGenerationStatus('starting');
-    startTimer();
+    setPromptGenerating(true);
+    setGeneratedMusicPrompt(null);
     try {
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-music?action=generate`, {
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-music-prompt`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          prompt: fullPrompt,
-          title,
-          lyrics,
-          style
-        })
+        body: JSON.stringify({ title, style, lyrics })
       });
       const data = await response.json();
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to start generation');
+        throw new Error(data.error || 'Failed to generate prompt');
       }
-      const taskId = data.taskId;
-      const currentPrompt = fullPrompt;
-
-      // Clear form
-      setTitle('');
-      setLyrics('');
-      setStyle('');
-      setGenerationStatus('pending');
-
-      // Poll for status
-      pollingRef.current = setInterval(async () => {
-        try {
-          const statusResponse = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-music?action=status&taskId=${taskId}&prompt=${encodeURIComponent(currentPrompt)}`, {
-            method: 'GET'
-          });
-          const statusData = await statusResponse.json();
-          if (statusData.status === 'PROCESSING') {
-            setGenerationStatus('processing');
-          } else if (statusData.status === 'SUCCESS') {
-            clearInterval(pollingRef.current!);
-            pollingRef.current = null;
-            stopTimer();
-            setGenerationStatus('idle');
-            toast.success('🎵 Music generated successfully!');
-            await fetchSavedMusic();
-            if (statusData.music?.file_url) {
-              playMusic(statusData.music.id, statusData.music.file_url);
-            }
-          } else if (statusData.status === 'FAILED') {
-            clearInterval(pollingRef.current!);
-            pollingRef.current = null;
-            stopTimer();
-            setGenerationStatus('idle');
-            toast.error('Music generation failed');
-          }
-        } catch (err) {
-          console.error('Status check error:', err);
-        }
-      }, 5000);
+      setGeneratedMusicPrompt(data.prompt);
+      toast.success('✨ Music prompt generated! Copy and use in Suno, Udio, or Stable Audio');
     } catch (error) {
       console.error('Error:', error);
-      stopTimer();
-      setGenerationStatus('idle');
-      toast.error(error instanceof Error ? error.message : 'Failed to generate music');
+      toast.error(error instanceof Error ? error.message : 'Failed to generate prompt');
+    } finally {
+      setPromptGenerating(false);
     }
   };
   const playMusic = (id: string, url: string) => {
@@ -313,20 +249,15 @@ const AIConsole = () => {
       setThumbnailStatus('idle');
     }
   };
-  const getStatusMessage = () => {
-    const time = `[${elapsedTime}s]`;
-    switch (generationStatus) {
-      case 'starting':
-        return `${time} >> Initializing AI composer...`;
-      case 'pending':
-        return `${time} >> Request queued, AI is warming up...`;
-      case 'processing':
-        return `${time} >> 🎼 Composing your masterpiece...`;
-      default:
-        return '>> Ready to create music...';
+  const copyPromptToClipboard = async () => {
+    if (!generatedMusicPrompt) return;
+    try {
+      await navigator.clipboard.writeText(generatedMusicPrompt);
+      toast.success('Prompt copied to clipboard!');
+    } catch {
+      toast.error('Failed to copy prompt');
     }
   };
-  const isGenerating = generationStatus !== 'idle';
   return <motion.div initial={{
     opacity: 0,
     scale: 0.95
@@ -348,7 +279,7 @@ const AIConsole = () => {
             <Terminal className="w-3 h-3" />
             ai-music-studio.exe
           </span>
-          <button onClick={surpriseMe} className="ml-auto flex items-center gap-1 px-2 py-1 text-xs bg-primary/20 hover:bg-primary/30 text-primary rounded transition-colors" disabled={isGenerating}>
+          <button onClick={surpriseMe} className="ml-auto flex items-center gap-1 px-2 py-1 text-xs bg-primary/20 hover:bg-primary/30 text-primary rounded transition-colors" disabled={promptGenerating}>
             <Shuffle className="w-3 h-3" />
             Surprise Me
           </button>
@@ -369,7 +300,7 @@ const AIConsole = () => {
             </label>
             <div className="relative">
               
-              <input type="text" value={title} onChange={e => setTitle(e.target.value)} className="w-full bg-input border border-border rounded px-8 py-2 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors font-mono text-sm" disabled={isGenerating} maxLength={100} placeholder="" />
+              <input type="text" value={title} onChange={e => setTitle(e.target.value)} className="w-full bg-input border border-border rounded px-8 py-2 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors font-mono text-sm" disabled={promptGenerating} maxLength={100} placeholder="" />
             </div>
           </div>
 
@@ -380,11 +311,11 @@ const AIConsole = () => {
               Music Style
             </label>
             <div className="flex flex-wrap gap-2">
-              {STYLE_PRESETS.map(preset => <button key={preset} onClick={() => setStyle(style === preset ? '' : preset)} disabled={isGenerating} className={`px-3 py-1 text-xs rounded-full transition-all ${style === preset ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80 text-muted-foreground'}`}>
+              {STYLE_PRESETS.map(preset => <button key={preset} onClick={() => setStyle(style === preset ? '' : preset)} disabled={promptGenerating} className={`px-3 py-1 text-xs rounded-full transition-all ${style === preset ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80 text-muted-foreground'}`}>
                   {preset}
                 </button>)}
             </div>
-            <input type="text" value={style} onChange={e => setStyle(e.target.value)} className="w-full bg-input border border-border rounded px-3 py-2 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors font-mono text-sm" disabled={isGenerating} maxLength={50} placeholder="" />
+            <input type="text" value={style} onChange={e => setStyle(e.target.value)} className="w-full bg-input border border-border rounded px-3 py-2 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors font-mono text-sm" disabled={promptGenerating} maxLength={50} placeholder="" />
           </div>
 
           {/* Lyrics Input */}
@@ -393,7 +324,7 @@ const AIConsole = () => {
               <Mic2 className="w-3 h-3" />
               Lyrics / Mood (optional)
             </label>
-            <textarea value={lyrics} onChange={e => setLyrics(e.target.value)} className="w-full bg-input border border-border rounded px-3 py-2 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors font-mono text-sm min-h-[80px] resize-none" disabled={isGenerating} maxLength={500} placeholder="Write your lyrics or describe the mood... " />
+            <textarea value={lyrics} onChange={e => setLyrics(e.target.value)} className="w-full bg-input border border-border rounded px-3 py-2 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors font-mono text-sm min-h-[80px] resize-none" disabled={promptGenerating} maxLength={500} placeholder="Write your lyrics or describe the mood... " />
             <div className="text-xs text-muted-foreground text-right">
               {lyrics.length}/500
             </div>
@@ -503,51 +434,47 @@ const AIConsole = () => {
             title={title || savedMusic[0]?.prompt?.split('.')[0] || 'Music Video'}
           />
 
-          {/* Generate Button */}
-          <NeonButton onClick={generateMusic} disabled={isGenerating || !title && !style && !lyrics} className="w-full justify-center">
-            {isGenerating ? <>
+          {/* Generate Prompt Button */}
+          <NeonButton onClick={generateMusicPrompt} disabled={promptGenerating || (!title && !style && !lyrics)} className="w-full justify-center">
+            {promptGenerating ? <>
                 <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                GENERATING...
+                GENERATING PROMPT...
               </> : <>
-                
-                CREATE MUSIC
+                <Sparkles className="w-4 h-4 mr-2" />
+                GENERATE MUSIC PROMPT
               </>}
           </NeonButton>
 
-          {/* Progress Status */}
+          {/* Generated Prompt Display */}
           <AnimatePresence>
-            {isGenerating && <motion.div initial={{
-            opacity: 0,
-            height: 0
-          }} animate={{
-            opacity: 1,
-            height: 'auto'
-          }} exit={{
-            opacity: 0,
-            height: 0
-          }} className="bg-background/50 rounded p-4 border border-primary/30">
-                <p className="text-sm font-mono text-primary">
-                  {getStatusMessage()}
-                  <span className="animate-pulse">▊</span>
-                </p>
-                
-                <div className="mt-3 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-                      <motion.div className="h-full bg-gradient-to-r from-primary via-pink-500 to-blue-500" initial={{
-                    width: '0%'
-                  }} animate={{
-                    width: generationStatus === 'starting' ? '15%' : generationStatus === 'pending' ? '35%' : generationStatus === 'processing' ? '75%' : '0%'
-                  }} transition={{
-                    duration: 0.5
-                  }} />
-                    </div>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    ⏱️ Usually takes 1-2 minutes. Your masterpiece is worth the wait!
+            {generatedMusicPrompt && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="bg-gradient-to-br from-primary/10 to-purple-500/10 rounded-lg p-4 border border-primary/30"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs text-primary font-semibold flex items-center gap-2">
+                    <Sparkles className="w-3 h-3" />
+                    Generated Music Prompt
                   </p>
+                  <button
+                    onClick={copyPromptToClipboard}
+                    className="flex items-center gap-1 px-2 py-1 text-xs bg-primary hover:bg-primary/80 text-primary-foreground rounded transition-colors"
+                  >
+                    <Share2 className="w-3 h-3" />
+                    Copy
+                  </button>
                 </div>
-              </motion.div>}
+                <p className="text-sm text-foreground font-mono leading-relaxed bg-background/50 rounded p-3 border border-border">
+                  {generatedMusicPrompt}
+                </p>
+                <p className="text-xs text-muted-foreground mt-3">
+                  📋 Copy this prompt and paste it into <strong>Suno</strong>, <strong>Udio</strong>, or <strong>Stable Audio</strong> to create your music!
+                </p>
+              </motion.div>
+            )}
           </AnimatePresence>
 
           {/* Waveform Visualizer */}
@@ -616,7 +543,7 @@ const AIConsole = () => {
 
           {/* Info Notice */}
           <p className="text-xs text-muted-foreground text-center">
-            🎵 Powered by Suno AI • Create unlimited music with AI
+            ✨ Generate professional prompts for Suno, Udio & Stable Audio
           </p>
         </div>
       </div>

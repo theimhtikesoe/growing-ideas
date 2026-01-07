@@ -1,118 +1,155 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Terminal, Loader2, Music, Sparkles, Play, Pause, Download, Trash2, Mic2, Palette, Type, Shuffle, Heart, Share2, Image, Wand2 } from 'lucide-react';
+import { Loader2, Music, Sparkles, Play, Pause, Download, Trash2, Heart, Share2, Image, Wand2, Film, Copy } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import NeonButton from './NeonButton';
-import WaveformVisualizer from './WaveformVisualizer';
-import VideoGenerator from './VideoGenerator';
+
 interface GeneratedMusic {
   id: string;
   prompt: string;
-  title?: string;
-  lyrics?: string;
-  style?: string;
   file_url: string;
   created_at: string;
-  thumbnail_url?: string;
 }
 
+type TabType = 'prompt' | 'thumbnail' | 'video' | 'library';
+
 const STYLE_PRESETS = ['Lo-fi Hip Hop', 'Synthwave', 'Epic Orchestral', 'Jazz Fusion', 'Acoustic Folk', 'Electronic Dance', 'Cinematic Ambient', 'Rock Ballad'];
+
 const THUMBNAIL_STYLES = [
-  { name: 'Neon', prompt: 'neon glowing, cyberpunk style, bright colors, electric atmosphere' },
-  { name: 'Minimalist', prompt: 'clean minimalist design, simple shapes, subtle colors, elegant typography space' },
-  { name: 'Vintage', prompt: 'retro vintage aesthetic, warm colors, film grain texture, nostalgic vibe' },
-  { name: '3D', prompt: '3D rendered, glossy surfaces, depth and shadows, modern 3D art style' }
+  { name: 'Neon', prompt: 'neon glowing, cyberpunk style, bright colors' },
+  { name: 'Minimalist', prompt: 'clean minimalist, simple shapes, elegant' },
+  { name: 'Vintage', prompt: 'retro vintage, warm colors, film grain' },
+  { name: '3D', prompt: '3D rendered, glossy surfaces, modern' }
 ];
 
-const SURPRISE_PROMPTS = [{
-  title: 'Neon Dreams',
-  style: 'Synthwave',
-  lyrics: 'City lights, endless nights, chasing electric dreams'
-}, {
-  title: 'Ocean Whispers',
-  style: 'Ambient',
-  lyrics: 'Waves of calm, washing over me, peaceful serenity'
-}, {
-  title: 'Midnight Drive',
-  style: 'Lo-fi',
-  lyrics: 'Empty roads, starlit sky, just you and I'
-}, {
-  title: 'Phoenix Rising',
-  style: 'Epic Orchestral',
-  lyrics: 'From the ashes we rise, reaching for the skies'
-}, {
-  title: 'Coffee Shop Vibes',
-  style: 'Jazz',
-  lyrics: 'Warm cup of memories, rainy afternoon melodies'
-}];
+const VIDEO_PRESETS = [
+  { name: 'Cinematic', prompt: 'cinematic transitions, dramatic lighting' },
+  { name: 'Trippy', prompt: 'psychedelic colors, morphing shapes' },
+  { name: 'Retro VHS', prompt: 'vintage VHS aesthetic, scan lines' },
+  { name: 'Glitch', prompt: 'digital glitch effects, cyberpunk' },
+];
+
 const AIConsole = () => {
+  const [activeTab, setActiveTab] = useState<TabType>('prompt');
+  
+  // Music Prompt State
   const [title, setTitle] = useState('');
-  const [lyrics, setLyrics] = useState('');
   const [style, setStyle] = useState('');
+  const [mood, setMood] = useState('');
+  const [generatedPrompt, setGeneratedPrompt] = useState<string | null>(null);
+  const [promptLoading, setPromptLoading] = useState(false);
+  
+  // Thumbnail State
   const [thumbnailPrompt, setThumbnailPrompt] = useState('');
-  const [generatedMusicPrompt, setGeneratedMusicPrompt] = useState<string | null>(null);
-  const [promptGenerating, setPromptGenerating] = useState(false);
-  const [thumbnailStatus, setThumbnailStatus] = useState<'idle' | 'generating'>('idle');
   const [generatedThumbnail, setGeneratedThumbnail] = useState<string | null>(null);
+  const [thumbnailLoading, setThumbnailLoading] = useState(false);
+  
+  // Video State
+  const [videoPrompt, setVideoPrompt] = useState('');
+  const [videoFrames, setVideoFrames] = useState<string[]>([]);
+  const [videoLoading, setVideoLoading] = useState(false);
+  const [currentFrame, setCurrentFrame] = useState(0);
+  
+  // Library State
   const [savedMusic, setSavedMusic] = useState<GeneratedMusic[]>([]);
   const [currentlyPlaying, setCurrentlyPlaying] = useState<string | null>(null);
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const pollingRef = useRef<NodeJS.Timeout | null>(null);
+
   useEffect(() => {
     fetchSavedMusic();
-    return () => {
-      if (pollingRef.current) clearInterval(pollingRef.current);
-    };
   }, []);
+
   const fetchSavedMusic = async () => {
-    const {
-      data,
-      error
-    } = await supabase.from('generated_music').select('*').order('created_at', {
-      ascending: false
-    }).limit(10);
-    if (error) {
-      console.error('Error fetching music:', error);
-      return;
-    }
-    setSavedMusic(data || []);
+    const { data, error } = await supabase
+      .from('generated_music')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(20);
+    if (!error && data) setSavedMusic(data);
   };
+
+  // Music Prompt Generation
   const generateMusicPrompt = async () => {
-    if (promptGenerating) return;
-    if (!title && !style && !lyrics) {
-      toast.error('Please add a title, style, or lyrics');
+    if (!title && !style && !mood) {
+      toast.error('Please fill in at least one field');
       return;
     }
-    setPromptGenerating(true);
-    setGeneratedMusicPrompt(null);
+    setPromptLoading(true);
     try {
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-music-prompt`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ title, style, lyrics })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, style, lyrics: mood })
       });
       const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to generate prompt');
-      }
-      setGeneratedMusicPrompt(data.prompt);
-      toast.success('✨ Music prompt generated! Copy and use in Suno, Udio, or Stable Audio');
+      if (!response.ok) throw new Error(data.error);
+      setGeneratedPrompt(data.prompt);
+      toast.success('Prompt generated!');
     } catch (error) {
-      console.error('Error:', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to generate prompt');
+      toast.error(error instanceof Error ? error.message : 'Failed to generate');
     } finally {
-      setPromptGenerating(false);
+      setPromptLoading(false);
     }
   };
+
+  // Thumbnail Generation
+  const generateThumbnail = async () => {
+    if (!thumbnailPrompt) {
+      toast.error('Please describe your thumbnail');
+      return;
+    }
+    setThumbnailLoading(true);
+    try {
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-thumbnail`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: thumbnailPrompt, title, style })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error);
+      setGeneratedThumbnail(data.imageUrl);
+      toast.success('Thumbnail generated!');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to generate');
+    } finally {
+      setThumbnailLoading(false);
+    }
+  };
+
+  // Video Generation
+  const generateVideo = async () => {
+    if (!generatedThumbnail) {
+      toast.error('Generate a thumbnail first');
+      return;
+    }
+    setVideoLoading(true);
+    try {
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-video`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          thumbnailUrl: generatedThumbnail,
+          musicUrl: savedMusic[0]?.file_url || null,
+          prompt: videoPrompt || 'dynamic music video',
+          title: title || 'Music Video'
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error);
+      setVideoFrames(data.frames || []);
+      toast.success(`Generated ${data.frames?.length || 0} frames!`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to generate');
+    } finally {
+      setVideoLoading(false);
+    }
+  };
+
+  // Audio Controls
   const playMusic = (id: string, url: string) => {
     if (audioElement) {
       audioElement.pause();
-      audioElement.currentTime = 0;
       setAudioElement(null);
     }
     if (currentlyPlaying === id) {
@@ -120,7 +157,6 @@ const AIConsole = () => {
       return;
     }
     const audio = new Audio(url);
-    audio.crossOrigin = 'anonymous';
     audio.onended = () => {
       setCurrentlyPlaying(null);
       setAudioElement(null);
@@ -129,424 +165,424 @@ const AIConsole = () => {
     setAudioElement(audio);
     setCurrentlyPlaying(id);
   };
-  const stopMusic = () => {
-    if (audioElement) {
-      audioElement.pause();
-      audioElement.currentTime = 0;
-      setAudioElement(null);
-    }
-    setCurrentlyPlaying(null);
-  };
-  const deleteMusic = async (id: string, filePath?: string) => {
+
+  const deleteMusic = async (id: string) => {
     if (currentlyPlaying === id) {
-      stopMusic();
+      audioElement?.pause();
+      setCurrentlyPlaying(null);
     }
-
-    // First get the file_path if not provided
-    let pathToDelete = filePath;
-    if (!pathToDelete) {
-      const track = savedMusic.find(t => t.id === id);
-      if (track) {
-        // Extract path from URL
-        const urlParts = track.file_url.split('/music/');
-        if (urlParts.length > 1) {
-          pathToDelete = urlParts[1];
-        }
-      }
-    }
-
-    // Delete from storage first
-    if (pathToDelete) {
-      const {
-        error: storageError
-      } = await supabase.storage.from('music').remove([pathToDelete]);
-      if (storageError) {
-        console.error('Storage delete error:', storageError);
-      }
-    }
-
-    // Delete from database
-    const {
-      error
-    } = await supabase.from('generated_music').delete().eq('id', id);
+    const { error } = await supabase.from('generated_music').delete().eq('id', id);
     if (error) {
       toast.error('Failed to delete');
       return;
     }
-
-    // Update local state immediately
-    setSavedMusic(prev => prev.filter(track => track.id !== id));
-    setFavorites(prev => {
-      const newFavs = new Set(prev);
-      newFavs.delete(id);
-      return newFavs;
-    });
-    toast.success('Track deleted');
-  };
-  const toggleFavorite = (id: string) => {
-    setFavorites(prev => {
-      const newFavs = new Set(prev);
-      if (newFavs.has(id)) {
-        newFavs.delete(id);
-      } else {
-        newFavs.add(id);
-        toast.success('Added to favorites!');
-      }
-      return newFavs;
-    });
-  };
-  const shareTrack = async (track: GeneratedMusic) => {
-    try {
-      await navigator.clipboard.writeText(track.file_url);
-      toast.success('Link copied to clipboard!');
-    } catch {
-      toast.error('Failed to copy link');
-    }
-  };
-  const surpriseMe = () => {
-    const random = SURPRISE_PROMPTS[Math.floor(Math.random() * SURPRISE_PROMPTS.length)];
-    setTitle(random.title);
-    setStyle(random.style);
-    setLyrics(random.lyrics);
-    setThumbnailPrompt(`A vibrant YouTube thumbnail for "${random.title}" - ${random.style} music vibes`);
-    setShowAdvanced(true);
-    toast.success('✨ Surprise prompt loaded!');
+    setSavedMusic(prev => prev.filter(t => t.id !== id));
+    toast.success('Deleted');
   };
 
-  const generateThumbnail = async () => {
-    if (thumbnailStatus === 'generating') return;
-    
-    const prompt = thumbnailPrompt || `YouTube thumbnail for "${title || 'Music'}" - ${style || 'modern'} style`;
-    
-    setThumbnailStatus('generating');
-    setGeneratedThumbnail(null);
-    
-    try {
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-thumbnail`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          prompt,
-          title,
-          style
-        })
-      });
-
-      const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to generate thumbnail');
-      }
-
-      setGeneratedThumbnail(data.imageUrl);
-      toast.success('🎨 Thumbnail generated!');
-    } catch (error) {
-      console.error('Thumbnail error:', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to generate thumbnail');
-    } finally {
-      setThumbnailStatus('idle');
-    }
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    toast.success('Copied to clipboard!');
   };
-  const copyPromptToClipboard = async () => {
-    if (!generatedMusicPrompt) return;
-    try {
-      await navigator.clipboard.writeText(generatedMusicPrompt);
-      toast.success('Prompt copied to clipboard!');
-    } catch {
-      toast.error('Failed to copy prompt');
-    }
-  };
-  return <motion.div initial={{
-    opacity: 0,
-    scale: 0.95
-  }} whileInView={{
-    opacity: 1,
-    scale: 1
-  }} viewport={{
-    once: true
-  }} className="w-full max-w-2xl mx-auto">
-      <div className="glass rounded-lg overflow-hidden border border-border">
-        {/* Terminal Header */}
-        <div className="flex items-center gap-2 px-4 py-3 bg-muted/50 border-b border-border">
-          <div className="flex gap-1.5">
-            <span className="w-3 h-3 rounded-full bg-red-500/80" />
-            <span className="w-3 h-3 rounded-full bg-yellow-500/80" />
-            <span className="w-3 h-3 rounded-full bg-green-500/80" />
-          </div>
-          <span className="flex items-center gap-2 text-xs text-muted-foreground ml-2">
-            <Terminal className="w-3 h-3" />
-            ai-music-studio.exe
-          </span>
-          <button onClick={surpriseMe} className="ml-auto flex items-center gap-1 px-2 py-1 text-xs bg-primary/20 hover:bg-primary/30 text-primary rounded transition-colors" disabled={promptGenerating}>
-            <Shuffle className="w-3 h-3" />
-            Surprise Me
-          </button>
+
+  const tabs = [
+    { id: 'prompt' as TabType, label: 'Music Prompt', icon: Sparkles },
+    { id: 'thumbnail' as TabType, label: 'Thumbnail', icon: Image },
+    { id: 'video' as TabType, label: 'Video', icon: Film },
+    { id: 'library' as TabType, label: 'Library', icon: Music, count: savedMusic.length },
+  ];
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true }}
+      className="w-full max-w-2xl mx-auto"
+    >
+      <div className="glass rounded-xl overflow-hidden border border-border">
+        {/* Tab Navigation */}
+        <div className="flex border-b border-border bg-muted/30">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-all ${
+                activeTab === tab.id
+                  ? 'bg-primary/10 text-primary border-b-2 border-primary'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+              }`}
+            >
+              <tab.icon className="w-4 h-4" />
+              <span className="hidden sm:inline">{tab.label}</span>
+              {tab.count !== undefined && tab.count > 0 && (
+                <span className="px-1.5 py-0.5 text-xs bg-primary/20 text-primary rounded-full">
+                  {tab.count}
+                </span>
+              )}
+            </button>
+          ))}
         </div>
 
-        {/* Terminal Body */}
-        <div className="p-6 space-y-4">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
-            <Sparkles className="w-4 h-4 text-primary" />
-            <span>Create AI-powered music with title, lyrics & style</span>
-          </div>
-
-          {/* Title Input */}
-          <div className="space-y-2">
-            <label className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Type className="w-3 h-3" />
-              Song Title
-            </label>
-            <div className="relative">
-              
-              <input type="text" value={title} onChange={e => setTitle(e.target.value)} className="w-full bg-input border border-border rounded px-8 py-2 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors font-mono text-sm" disabled={promptGenerating} maxLength={100} placeholder="" />
-            </div>
-          </div>
-
-          {/* Style Selection */}
-          <div className="space-y-2">
-            <label className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Palette className="w-3 h-3" />
-              Music Style
-            </label>
-            <div className="flex flex-wrap gap-2">
-              {STYLE_PRESETS.map(preset => <button key={preset} onClick={() => setStyle(style === preset ? '' : preset)} disabled={promptGenerating} className={`px-3 py-1 text-xs rounded-full transition-all ${style === preset ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80 text-muted-foreground'}`}>
-                  {preset}
-                </button>)}
-            </div>
-            <input type="text" value={style} onChange={e => setStyle(e.target.value)} className="w-full bg-input border border-border rounded px-3 py-2 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors font-mono text-sm" disabled={promptGenerating} maxLength={50} placeholder="" />
-          </div>
-
-          {/* Lyrics Input */}
-          <div className="space-y-2">
-            <label className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Mic2 className="w-3 h-3" />
-              Lyrics / Mood (optional)
-            </label>
-            <textarea value={lyrics} onChange={e => setLyrics(e.target.value)} className="w-full bg-input border border-border rounded px-3 py-2 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors font-mono text-sm min-h-[80px] resize-none" disabled={promptGenerating} maxLength={500} placeholder="Write your lyrics or describe the mood... " />
-            <div className="text-xs text-muted-foreground text-right">
-              {lyrics.length}/500
-            </div>
-          </div>
-
-          {/* Thumbnail Prompt */}
-          <div className="space-y-2 p-4 bg-gradient-to-r from-pink-500/10 to-purple-500/10 rounded-lg border border-pink-500/20">
-            <label className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Image className="w-3 h-3" />
-              YouTube Thumbnail Prompt
-            </label>
-            <textarea
-              value={thumbnailPrompt}
-              onChange={e => setThumbnailPrompt(e.target.value)}
-              className="w-full bg-input border border-border rounded px-3 py-2 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors font-mono text-sm min-h-[60px] resize-none"
-              disabled={thumbnailStatus === 'generating'}
-              maxLength={300}
-              placeholder="Describe your YouTube thumbnail... e.g., 'Neon cityscape with glowing music notes, cyberpunk style'"
-            />
-            
-            {/* Thumbnail Style Presets */}
-            <div className="flex flex-wrap gap-2 mt-2">
-              {THUMBNAIL_STYLES.map((stylePreset) => (
-                <button
-                  key={stylePreset.name}
-                  onClick={() => {
-                    const basePrompt = title ? `YouTube thumbnail for "${title}"` : 'YouTube music thumbnail';
-                    setThumbnailPrompt(`${basePrompt} - ${stylePreset.prompt}`);
-                  }}
-                  disabled={thumbnailStatus === 'generating'}
-                  className="px-3 py-1.5 text-xs rounded-full bg-gradient-to-r from-pink-500/20 to-purple-500/20 hover:from-pink-500/30 hover:to-purple-500/30 border border-pink-500/30 text-pink-300 transition-all disabled:opacity-50"
-                >
-                  {stylePreset.name}
-                </button>
-              ))}
-            </div>
-            
-            <div className="flex items-center justify-between mt-2">
-              <div className="text-xs text-muted-foreground">
-                {thumbnailPrompt.length}/300
-              </div>
-              <button
-                onClick={generateThumbnail}
-                disabled={thumbnailStatus === 'generating'}
-                className="flex items-center gap-2 px-3 py-1.5 text-xs bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 text-white rounded-md transition-all disabled:opacity-50"
+        {/* Tab Content */}
+        <div className="p-6">
+          <AnimatePresence mode="wait">
+            {/* Music Prompt Tab */}
+            {activeTab === 'prompt' && (
+              <motion.div
+                key="prompt"
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 20 }}
+                className="space-y-4"
               >
-                {thumbnailStatus === 'generating' ? (
-                  <>
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                    Generating...
-                  </>
-                ) : (
-                  <>
-                    <Wand2 className="w-3 h-3" />
-                    Generate Thumbnail
-                  </>
-                )}
-              </button>
-            </div>
-            
-            {/* Generated Thumbnail Preview */}
-            <AnimatePresence>
-              {generatedThumbnail && (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.9 }}
-                  className="mt-3"
+                <p className="text-sm text-muted-foreground">
+                  Generate professional prompts for Suno, Udio, or Stable Audio
+                </p>
+
+                <div className="space-y-3">
+                  <input
+                    type="text"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    placeholder="Song title (optional)"
+                    className="w-full bg-input border border-border rounded-lg px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors"
+                  />
+
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground">Select style:</p>
+                    <div className="flex flex-wrap gap-2">
+                      {STYLE_PRESETS.map((preset) => (
+                        <button
+                          key={preset}
+                          onClick={() => setStyle(style === preset ? '' : preset)}
+                          className={`px-3 py-1.5 text-xs rounded-full transition-all ${
+                            style === preset
+                              ? 'bg-primary text-primary-foreground'
+                              : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                          }`}
+                        >
+                          {preset}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <textarea
+                    value={mood}
+                    onChange={(e) => setMood(e.target.value)}
+                    placeholder="Describe mood or add lyrics..."
+                    rows={3}
+                    className="w-full bg-input border border-border rounded-lg px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors resize-none"
+                  />
+                </div>
+
+                <button
+                  onClick={generateMusicPrompt}
+                  disabled={promptLoading}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg font-medium transition-colors disabled:opacity-50"
                 >
-                  <p className="text-xs text-primary mb-2">✨ Generated Thumbnail:</p>
-                  <div className="relative group">
+                  {promptLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="w-4 h-4" />
+                  )}
+                  Generate Prompt
+                </button>
+
+                {generatedPrompt && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="p-4 bg-primary/5 border border-primary/20 rounded-lg space-y-3"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-sm text-foreground leading-relaxed">{generatedPrompt}</p>
+                      <button
+                        onClick={() => copyToClipboard(generatedPrompt)}
+                        className="p-2 hover:bg-primary/10 rounded-lg transition-colors"
+                      >
+                        <Copy className="w-4 h-4 text-primary" />
+                      </button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Copy and paste into Suno, Udio, or Stable Audio
+                    </p>
+                  </motion.div>
+                )}
+              </motion.div>
+            )}
+
+            {/* Thumbnail Tab */}
+            {activeTab === 'thumbnail' && (
+              <motion.div
+                key="thumbnail"
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 20 }}
+                className="space-y-4"
+              >
+                <p className="text-sm text-muted-foreground">
+                  Create AI-powered thumbnails for YouTube & social media
+                </p>
+
+                <textarea
+                  value={thumbnailPrompt}
+                  onChange={(e) => setThumbnailPrompt(e.target.value)}
+                  placeholder="Describe your thumbnail... e.g., 'Neon city with glowing music notes'"
+                  rows={3}
+                  className="w-full bg-input border border-border rounded-lg px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors resize-none"
+                />
+
+                <div className="flex flex-wrap gap-2">
+                  {THUMBNAIL_STYLES.map((preset) => (
+                    <button
+                      key={preset.name}
+                      onClick={() => setThumbnailPrompt(preset.prompt)}
+                      className="px-3 py-1.5 text-xs rounded-full bg-secondary/10 text-secondary hover:bg-secondary/20 transition-colors"
+                    >
+                      {preset.name}
+                    </button>
+                  ))}
+                </div>
+
+                <button
+                  onClick={generateThumbnail}
+                  disabled={thumbnailLoading}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-secondary hover:bg-secondary/90 text-secondary-foreground rounded-lg font-medium transition-colors disabled:opacity-50"
+                >
+                  {thumbnailLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Wand2 className="w-4 h-4" />
+                  )}
+                  Generate Thumbnail
+                </button>
+
+                {generatedThumbnail && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="space-y-3"
+                  >
                     <img
                       src={generatedThumbnail}
                       alt="Generated thumbnail"
-                      className="w-full max-w-md rounded-lg border border-primary/30 shadow-lg"
+                      className="w-full rounded-lg border border-border"
                     />
-                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center gap-2">
+                    <div className="flex gap-2">
                       <a
                         href={generatedThumbnail}
                         download="thumbnail.png"
-                        className="p-2 bg-primary rounded-full text-primary-foreground hover:bg-primary/80 transition-colors"
-                        title="Download"
+                        className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-muted hover:bg-muted/80 rounded-lg text-sm transition-colors"
                       >
                         <Download className="w-4 h-4" />
+                        Download
                       </a>
                       <button
-                        onClick={() => {
-                          navigator.clipboard.writeText(generatedThumbnail);
-                          toast.success('Thumbnail URL copied!');
-                        }}
-                        className="p-2 bg-primary rounded-full text-primary-foreground hover:bg-primary/80 transition-colors"
-                        title="Copy URL"
+                        onClick={() => copyToClipboard(generatedThumbnail)}
+                        className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-muted hover:bg-muted/80 rounded-lg text-sm transition-colors"
                       >
-                        <Share2 className="w-4 h-4" />
+                        <Copy className="w-4 h-4" />
+                        Copy URL
                       </button>
                     </div>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
+                  </motion.div>
+                )}
+              </motion.div>
+            )}
 
-          {/* Video Generator */}
-          <VideoGenerator 
-            thumbnailUrl={generatedThumbnail} 
-            musicUrl={savedMusic[0]?.file_url || null}
-            title={title || savedMusic[0]?.prompt?.split('.')[0] || 'Music Video'}
-          />
-
-          {/* Generate Prompt Button */}
-          <NeonButton onClick={generateMusicPrompt} disabled={promptGenerating || (!title && !style && !lyrics)} className="w-full justify-center">
-            {promptGenerating ? <>
-                <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                GENERATING PROMPT...
-              </> : <>
-                <Sparkles className="w-4 h-4 mr-2" />
-                GENERATE MUSIC PROMPT
-              </>}
-          </NeonButton>
-
-          {/* Generated Prompt Display */}
-          <AnimatePresence>
-            {generatedMusicPrompt && (
+            {/* Video Tab */}
+            {activeTab === 'video' && (
               <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                className="bg-gradient-to-br from-primary/10 to-purple-500/10 rounded-lg p-4 border border-primary/30"
+                key="video"
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 20 }}
+                className="space-y-4"
               >
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs text-primary font-semibold flex items-center gap-2">
-                    <Sparkles className="w-3 h-3" />
-                    Generated Music Prompt
-                  </p>
-                  <button
-                    onClick={copyPromptToClipboard}
-                    className="flex items-center gap-1 px-2 py-1 text-xs bg-primary hover:bg-primary/80 text-primary-foreground rounded transition-colors"
-                  >
-                    <Share2 className="w-3 h-3" />
-                    Copy
-                  </button>
-                </div>
-                <p className="text-sm text-foreground font-mono leading-relaxed bg-background/50 rounded p-3 border border-border">
-                  {generatedMusicPrompt}
+                <p className="text-sm text-muted-foreground">
+                  Create video frames from your thumbnail for YouTube/TikTok
                 </p>
-                <p className="text-xs text-muted-foreground mt-3">
-                  📋 Copy this prompt and paste it into <strong>Suno</strong>, <strong>Udio</strong>, or <strong>Stable Audio</strong> to create your music!
-                </p>
+
+                {!generatedThumbnail ? (
+                  <div className="p-6 border border-dashed border-border rounded-lg text-center">
+                    <Film className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+                    <p className="text-sm text-muted-foreground">
+                      Generate a thumbnail first to create video frames
+                    </p>
+                    <button
+                      onClick={() => setActiveTab('thumbnail')}
+                      className="mt-3 text-sm text-primary hover:underline"
+                    >
+                      Go to Thumbnail →
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="aspect-video rounded-lg overflow-hidden border border-border">
+                      <img
+                        src={generatedThumbnail}
+                        alt="Base thumbnail"
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+
+                    <textarea
+                      value={videoPrompt}
+                      onChange={(e) => setVideoPrompt(e.target.value)}
+                      placeholder="Video style... e.g., 'cinematic transitions, pulsing effects'"
+                      rows={2}
+                      className="w-full bg-input border border-border rounded-lg px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors resize-none"
+                    />
+
+                    <div className="flex flex-wrap gap-2">
+                      {VIDEO_PRESETS.map((preset) => (
+                        <button
+                          key={preset.name}
+                          onClick={() => setVideoPrompt(preset.prompt)}
+                          className="px-3 py-1.5 text-xs rounded-full bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-colors"
+                        >
+                          {preset.name}
+                        </button>
+                      ))}
+                    </div>
+
+                    <button
+                      onClick={generateVideo}
+                      disabled={videoLoading}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-500 to-green-500 hover:from-blue-600 hover:to-green-600 text-white rounded-lg font-medium transition-colors disabled:opacity-50"
+                    >
+                      {videoLoading ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Film className="w-4 h-4" />
+                      )}
+                      Generate Video Frames
+                    </button>
+
+                    {videoFrames.length > 0 && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="space-y-3"
+                      >
+                        <div className="aspect-video rounded-lg overflow-hidden border border-primary/30 bg-black">
+                          <img
+                            src={videoFrames[currentFrame]}
+                            alt={`Frame ${currentFrame + 1}`}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <div className="flex gap-2 overflow-x-auto pb-2">
+                          {videoFrames.map((frame, idx) => (
+                            <button
+                              key={idx}
+                              onClick={() => setCurrentFrame(idx)}
+                              className={`flex-shrink-0 w-16 h-10 rounded overflow-hidden border-2 transition-all ${
+                                idx === currentFrame ? 'border-primary' : 'border-transparent opacity-60'
+                              }`}
+                            >
+                              <img src={frame} alt="" className="w-full h-full object-cover" />
+                            </button>
+                          ))}
+                        </div>
+                      </motion.div>
+                    )}
+                  </>
+                )}
+              </motion.div>
+            )}
+
+            {/* Library Tab */}
+            {activeTab === 'library' && (
+              <motion.div
+                key="library"
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 20 }}
+                className="space-y-4"
+              >
+                {savedMusic.length === 0 ? (
+                  <div className="p-8 text-center">
+                    <Music className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
+                    <p className="text-muted-foreground">No saved music yet</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                    {savedMusic.map((track) => (
+                      <motion.div
+                        key={track.id}
+                        layout
+                        className={`flex items-center gap-3 p-3 rounded-lg border transition-all ${
+                          currentlyPlaying === track.id
+                            ? 'bg-primary/10 border-primary/50'
+                            : 'bg-muted/30 border-border hover:border-primary/30'
+                        }`}
+                      >
+                        <button
+                          onClick={() => playMusic(track.id, track.file_url)}
+                          className={`p-2.5 rounded-full transition-colors ${
+                            currentlyPlaying === track.id
+                              ? 'bg-primary text-primary-foreground'
+                              : 'bg-primary/20 hover:bg-primary/30'
+                          }`}
+                        >
+                          {currentlyPlaying === track.id ? (
+                            <Pause className="w-4 h-4" />
+                          ) : (
+                            <Play className="w-4 h-4 text-primary" />
+                          )}
+                        </button>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-foreground truncate font-medium">
+                            {track.prompt.split('.')[0] || 'Untitled'}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {new Date(track.created_at).toLocaleDateString()}
+                          </p>
+                        </div>
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => {
+                              const newFavs = new Set(favorites);
+                              if (newFavs.has(track.id)) {
+                                newFavs.delete(track.id);
+                              } else {
+                                newFavs.add(track.id);
+                              }
+                              setFavorites(newFavs);
+                            }}
+                            className={`p-2 rounded-lg transition-colors ${
+                              favorites.has(track.id) ? 'text-pink-500' : 'text-muted-foreground hover:text-pink-500'
+                            }`}
+                          >
+                            <Heart className={`w-4 h-4 ${favorites.has(track.id) ? 'fill-current' : ''}`} />
+                          </button>
+                          <a
+                            href={track.file_url}
+                            download
+                            className="p-2 rounded-lg text-muted-foreground hover:text-green-500 transition-colors"
+                          >
+                            <Download className="w-4 h-4" />
+                          </a>
+                          <button
+                            onClick={() => deleteMusic(track.id)}
+                            className="p-2 rounded-lg text-muted-foreground hover:text-destructive transition-colors"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                )}
               </motion.div>
             )}
           </AnimatePresence>
-
-          {/* Waveform Visualizer */}
-          {currentlyPlaying && <motion.div initial={{
-          opacity: 0,
-          y: 10
-        }} animate={{
-          opacity: 1,
-          y: 0
-        }} className="p-4 bg-black/30 rounded-lg border border-primary/20">
-              <div className="flex items-center gap-2 mb-2">
-                <Music className="w-4 h-4 text-primary animate-pulse" />
-                <span className="text-xs text-primary">Now Playing</span>
-              </div>
-              <WaveformVisualizer audioElement={audioElement} isPlaying={!!currentlyPlaying} />
-            </motion.div>}
-
-          {/* Saved Music Library */}
-          {savedMusic.length > 0 && <div className="space-y-2">
-              <h4 className="text-sm font-semibold text-primary flex items-center gap-2">
-                <Music className="w-4 h-4" />
-                Your Music Library ({savedMusic.length})
-              </h4>
-              <div className="max-h-[250px] overflow-y-auto space-y-2 pr-1">
-                {savedMusic.map(track => <motion.div key={track.id} layout initial={{
-              opacity: 0,
-              x: -20
-            }} animate={{
-              opacity: 1,
-              x: 0
-            }} exit={{
-              opacity: 0,
-              x: 20
-            }} className={`flex items-center gap-3 p-3 rounded border transition-all ${currentlyPlaying === track.id ? 'bg-primary/10 border-primary/50' : 'bg-muted/30 border-border/50 hover:border-primary/30'}`}>
-                    <button onClick={() => playMusic(track.id, track.file_url)} className={`p-2 rounded-full transition-colors ${currentlyPlaying === track.id ? 'bg-primary text-primary-foreground' : 'bg-primary/20 hover:bg-primary/30'}`}>
-                      {currentlyPlaying === track.id ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 text-primary" />}
-                    </button>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm text-foreground truncate font-medium">
-                        {track.prompt.split('.')[0] || 'Untitled Track'}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {new Date(track.created_at).toLocaleDateString()} • {new Date(track.created_at).toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit'
-                  })}
-                      </p>
-                    </div>
-                    <div className="flex gap-1">
-                      <button onClick={() => toggleFavorite(track.id)} className={`p-2 rounded transition-colors ${favorites.has(track.id) ? 'text-pink-500' : 'text-muted-foreground hover:text-pink-500'}`} title="Favorite">
-                        <Heart className={`w-4 h-4 ${favorites.has(track.id) ? 'fill-current' : ''}`} />
-                      </button>
-                      <button onClick={() => shareTrack(track)} className="p-2 rounded text-muted-foreground hover:text-blue-500 transition-colors" title="Share">
-                        <Share2 className="w-4 h-4" />
-                      </button>
-                      <a href={track.file_url} download className="p-2 rounded text-muted-foreground hover:text-green-500 transition-colors" title="Download">
-                        <Download className="w-4 h-4" />
-                      </a>
-                      <button onClick={() => deleteMusic(track.id)} className="p-2 rounded text-muted-foreground hover:text-destructive transition-colors" title="Delete">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </motion.div>)}
-              </div>
-            </div>}
-
-          {/* Info Notice */}
-          <p className="text-xs text-muted-foreground text-center">
-            ✨ Generate professional prompts for Suno, Udio & Stable Audio
-          </p>
         </div>
       </div>
-    </motion.div>;
+    </motion.div>
+  );
 };
+
 export default AIConsole;

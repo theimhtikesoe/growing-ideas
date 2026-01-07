@@ -4,6 +4,7 @@ import HeroSection from '../components/HeroSection';
 import CodeSection from '../components/CodeSection';
 import MusicSection from '../components/MusicSection';
 import AILabSection from '../components/AILabSection';
+import LiveDemoSection from '../components/LiveDemoSection';
 import Footer from '../components/Footer';
 
 const Index = () => {
@@ -19,6 +20,7 @@ const Index = () => {
       <main>
         <HeroSection />
         <CodeSection />
+        <LiveDemoSection />
         <MusicSection />
         <AILabSection />
       </main>

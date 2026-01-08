@@ -18,7 +18,7 @@ const MusicSection = () => {
           <div className="flex items-center justify-center gap-3 mb-2">
             <Headphones className="w-8 h-8 text-secondary" />
           </div>
-          <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold">Zayat Vibes<span className="text-secondary">Zayat</span> Vibes
+          <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold">Youtube Channel<span className="text-secondary">Zayat</span> Vibes
           </h2>
           <p className="text-muted-foreground max-w-xl mx-auto">
             Burmese-English drill music. Raw musical moments, chill vibes, and emo beats.

@@ -18,7 +18,7 @@ const MusicSection = () => {
           <div className="flex items-center justify-center gap-3 mb-2">
             <Headphones className="w-8 h-8 text-secondary" />
           </div>
-          <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold">YouTube Channel<span className="text-secondary">Zayat</span> Vibes
+          <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold">Zayat Vibes<span className="text-secondary">Zayat</span> Vibes
           </h2>
           <p className="text-muted-foreground max-w-xl mx-auto">
             Burmese-English drill music. Raw musical moments, chill vibes, and emo beats.
@@ -90,7 +90,47 @@ const MusicSection = () => {
         </div>
 
         {/* Featured Tracks */}
-        
+        <motion.div initial={{
+        opacity: 0,
+        y: 20
+      }} whileInView={{
+        opacity: 1,
+        y: 0
+      }} viewport={{
+        once: true
+      }} className="max-w-2xl mx-auto">
+          <h3 className="text-center text-sm uppercase tracking-wider text-muted-foreground mb-6">
+            Featured Tracks
+          </h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {[{
+            title: 'Movin',
+            type: 'Single'
+          }, {
+            title: "I'm So Lonely on Valentine's Day",
+            type: 'Single'
+          }, {
+            title: 'Phom Movin',
+            type: 'Short'
+          }, {
+            title: 'Emo Beats',
+            type: 'Vibes'
+          }].map((track, index) => <motion.div key={track.title} initial={{
+            opacity: 0,
+            y: 10
+          }} whileInView={{
+            opacity: 1,
+            y: 0
+          }} viewport={{
+            once: true
+          }} transition={{
+            delay: index * 0.1
+          }} className="glass p-3 rounded-lg text-center hover:border-secondary/50 transition-colors cursor-pointer">
+                <div className="text-sm font-medium truncate">{track.title}</div>
+                <div className="text-xs text-muted-foreground">{track.type}</div>
+              </motion.div>)}
+          </div>
+        </motion.div>
 
         {/* Stats */}
         <motion.div initial={{
@@ -111,7 +151,20 @@ const MusicSection = () => {
         }, {
           label: 'Style',
           value: 'Drill'
-        }].map((stat, index) => {})}
+        }].map((stat, index) => <motion.div key={stat.label} initial={{
+          opacity: 0,
+          y: 20
+        }} whileInView={{
+          opacity: 1,
+          y: 0
+        }} viewport={{
+          once: true
+        }} transition={{
+          delay: index * 0.1
+        }} className="glass p-4 rounded-lg text-center">
+              <div className="text-2xl font-bold text-secondary">{stat.value}</div>
+              <div className="text-xs text-muted-foreground uppercase tracking-wider">{stat.label}</div>
+            </motion.div>)}
         </motion.div>
 
         {/* CTA */}

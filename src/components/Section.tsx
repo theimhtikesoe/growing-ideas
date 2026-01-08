@@ -1,9 +1,5 @@
-import { ReactNode, useRef, useEffect } from 'react';
+import { ReactNode, useRef } from 'react';
 import { motion, useInView } from 'framer-motion';
-import gsap from 'gsap';
-import { ScrollTrigger } from 'gsap/ScrollTrigger';
-
-gsap.registerPlugin(ScrollTrigger);
 
 interface SectionProps {
   id: string;
@@ -12,36 +8,35 @@ interface SectionProps {
   fullHeight?: boolean;
 }
 
+const sectionVariants = {
+  hidden: { 
+    opacity: 0, 
+    y: 60,
+    scale: 0.95
+  },
+  visible: { 
+    opacity: 1, 
+    y: 0,
+    scale: 1,
+    transition: {
+      duration: 0.8,
+      ease: "easeOut" as const,
+      staggerChildren: 0.1
+    }
+  }
+};
+
 const Section = ({ id, children, className = '', fullHeight = true }: SectionProps) => {
   const sectionRef = useRef<HTMLElement>(null);
-  const isInView = useInView(sectionRef, { once: true, amount: 0.2 });
-
-  useEffect(() => {
-    if (!sectionRef.current) return;
-
-    gsap.fromTo(
-      sectionRef.current,
-      { opacity: 0 },
-      {
-        opacity: 1,
-        duration: 1,
-        scrollTrigger: {
-          trigger: sectionRef.current,
-          start: 'top 80%',
-          end: 'top 20%',
-          toggleActions: 'play none none reverse',
-        },
-      }
-    );
-  }, []);
+  const isInView = useInView(sectionRef, { once: true, amount: 0.15 });
 
   return (
     <motion.section
       ref={sectionRef}
       id={id}
-      initial={{ opacity: 0 }}
-      animate={{ opacity: isInView ? 1 : 0 }}
-      transition={{ duration: 0.8 }}
+      initial="hidden"
+      animate={isInView ? "visible" : "hidden"}
+      variants={sectionVariants}
       className={`
         relative z-10
         ${fullHeight ? 'min-h-screen' : ''}
@@ -51,9 +46,18 @@ const Section = ({ id, children, className = '', fullHeight = true }: SectionPro
         ${className}
       `}
     >
-      <div className="w-full max-w-6xl mx-auto">
+      <motion.div 
+        className="w-full max-w-6xl mx-auto"
+        variants={{
+          hidden: { opacity: 0 },
+          visible: { 
+            opacity: 1,
+            transition: { staggerChildren: 0.08 }
+          }
+        }}
+      >
         {children}
-      </div>
+      </motion.div>
     </motion.section>
   );
 };

@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Menu, X } from 'lucide-react';
+import ThemeToggle from './ThemeToggle';
 
 const navItems = [
   { id: 'home', label: 'Home' },
   { id: 'code', label: 'Code' },
+  { id: 'demos', label: 'Demos' },
   { id: 'music', label: 'Music' },
   { id: 'ai-lab', label: 'AI Lab' },
 ];
@@ -86,6 +88,7 @@ const Navigation = () => {
                 )}
               </button>
             ))}
+            <ThemeToggle />
           </div>
 
           {/* Mobile Menu Button */}

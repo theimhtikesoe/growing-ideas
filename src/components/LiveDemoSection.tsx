@@ -16,6 +16,16 @@ const LIVE_DEMOS: LiveDemo[] = [
     description: 'Modern restaurant menu with sleek UI design',
     url: 'https://the-lobby-menu.vercel.app/',
   },
+  {
+    title: 'Radio Rhyzoe',
+    description: 'AI-powered music radio streaming platform',
+    url: 'https://radiorhyzoe.lovable.app/',
+  },
+  {
+    title: 'Vintage Myanmar Songs',
+    description: 'Collection of classic Myanmar music archive',
+    url: 'https://vintagemyanmarsoxngs.lovable.app/',
+  },
 ];
 
 const LiveDemoSection = () => {

@@ -48,72 +48,65 @@ const LiveDemoSection = () => {
           </p>
         </motion.div>
 
-        {/* Demo Cards */}
-        <div className="grid gap-8">
+        {/* Demo Cards - Compact Grid */}
+        <div className="grid md:grid-cols-3 gap-4">
           {LIVE_DEMOS.map((demo, index) => (
             <motion.div
               key={demo.url}
-              initial={{ opacity: 0, y: 30 }}
+              initial={{ opacity: 0, y: 20 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               transition={{ delay: index * 0.1 }}
               className="group"
             >
-              <div className="glass rounded-xl overflow-hidden border border-border hover:border-primary/50 transition-all duration-300">
-                {/* Header */}
-                <div className="flex items-center justify-between px-4 py-3 bg-muted/50 border-b border-border">
-                  <div className="flex items-center gap-3">
-                    <div className="flex gap-1.5">
-                      <span className="w-3 h-3 rounded-full bg-red-500/80" />
-                      <span className="w-3 h-3 rounded-full bg-yellow-500/80" />
-                      <span className="w-3 h-3 rounded-full bg-green-500/80" />
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Monitor className="w-4 h-4 text-muted-foreground" />
-                      <span className="text-sm font-medium text-foreground">{demo.title}</span>
-                    </div>
-                  </div>
+              <div className="glass rounded-lg overflow-hidden border border-border hover:border-primary/50 transition-all duration-300 hover:shadow-lg hover:shadow-primary/10">
+                {/* Compact Header */}
+                <div className="flex items-center justify-between px-3 py-2 bg-muted/50 border-b border-border">
                   <div className="flex items-center gap-2">
-                    <a
-                      href={demo.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1 px-3 py-1.5 text-xs bg-primary hover:bg-primary/80 text-primary-foreground rounded-md transition-colors"
-                    >
-                      <ExternalLink className="w-3 h-3" />
-                      Open Site
-                    </a>
+                    <div className="flex gap-1">
+                      <span className="w-2 h-2 rounded-full bg-red-500/80" />
+                      <span className="w-2 h-2 rounded-full bg-yellow-500/80" />
+                      <span className="w-2 h-2 rounded-full bg-green-500/80" />
+                    </div>
+                    <span className="text-xs font-medium text-foreground truncate max-w-[120px]">{demo.title}</span>
                   </div>
-                </div>
-
-                {/* iframe Preview */}
-                <div className="relative aspect-video bg-background">
-                  <iframe
-                    src={demo.url}
-                    title={demo.title}
-                    className="w-full h-full border-0"
-                    loading="lazy"
-                    sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
-                  />
-                  
-                  {/* Overlay for click interaction */}
                   <a
                     href={demo.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="absolute inset-0 bg-black/0 hover:bg-black/20 transition-colors flex items-center justify-center opacity-0 hover:opacity-100 group-hover:opacity-100"
+                    className="p-1.5 text-muted-foreground hover:text-primary transition-colors"
                   >
-                    <div className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg shadow-lg transform scale-95 group-hover:scale-100 transition-transform">
-                      <Maximize2 className="w-4 h-4" />
-                      <span className="font-medium">View Full Site</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                </div>
+
+                {/* Small iframe Preview */}
+                <div className="relative aspect-[4/3] bg-background">
+                  <iframe
+                    src={demo.url}
+                    title={demo.title}
+                    className="w-full h-full border-0 pointer-events-none"
+                    loading="lazy"
+                    sandbox="allow-scripts allow-same-origin"
+                  />
+                  
+                  {/* Hover Overlay */}
+                  <a
+                    href={demo.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="absolute inset-0 bg-black/0 hover:bg-black/40 transition-colors flex items-center justify-center opacity-0 hover:opacity-100"
+                  >
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm rounded-md shadow-lg">
+                      <Maximize2 className="w-3.5 h-3.5" />
+                      <span className="font-medium">View</span>
                     </div>
                   </a>
                 </div>
 
-                {/* Footer */}
-                <div className="px-4 py-3 bg-muted/30 border-t border-border">
-                  <p className="text-sm text-muted-foreground">{demo.description}</p>
-                  <p className="text-xs text-primary/70 mt-1 font-mono truncate">{demo.url}</p>
+                {/* Compact Footer */}
+                <div className="px-3 py-2 bg-muted/30 border-t border-border">
+                  <p className="text-xs text-muted-foreground line-clamp-1">{demo.description}</p>
                 </div>
               </div>
             </motion.div>
